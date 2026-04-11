@@ -1,0 +1,4 @@
+node_modules/
+dist/
+scripts/mcp-server.cjs
+scripts/mcp-server.cjs.map

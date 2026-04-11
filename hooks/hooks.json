@@ -1,0 +1,4 @@
+{
+  "description": "claude-mem-graph hooks (Phase 1: empty, tools are on-demand only)",
+  "hooks": {}
+}
