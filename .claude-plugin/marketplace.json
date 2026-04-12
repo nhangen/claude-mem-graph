@@ -1,0 +1,18 @@
+{
+  "name": "claude-mem-graph",
+  "owner": {
+    "name": "nhangen"
+  },
+  "metadata": {
+    "description": "Graph-aware context retrieval over claude-mem observations"
+  },
+  "plugins": [
+    {
+      "name": "claude-mem-graph",
+      "source": "./",
+      "description": "Graph-aware context retrieval over claude-mem observations. Builds an in-memory knowledge graph with 9 inferred edge types for relationship-aware queries, staleness detection, session arc tracking, and cross-project file impact analysis.",
+      "version": "0.1.0",
+      "category": "analytics"
+    }
+  ]
+}
