@@ -123,7 +123,12 @@ function addLedToEdges(graph: GraphType, observations: Observation[]): void {
   }
 }
 
-function conceptOverlap(a: string[], b: string[]): number {
+const CONCEPT_STOPWORDS = new Set([
+  'how-it-works', 'pattern', 'what-changed', 'problem-solution', 'gotcha',
+  'trade-off', 'why-it-exists', 'best-practice',
+]);
+
+function conceptOverlapRatio(a: string[], b: string[]): number {
   const setA = new Set(a);
   const intersection = b.filter(c => setA.has(c));
   const minLen = Math.min(a.length, b.length);
@@ -143,7 +148,10 @@ function addSupersedesEdges(graph: GraphType, observations: Observation[]): void
       const older = eligible[j];
       if (newer.createdAt <= older.createdAt) continue;
       if (newer.project !== older.project) continue;
-      if (conceptOverlap(newer.concepts, older.concepts) >= 0.5) {
+      const newerConcepts = newer.concepts.filter(c => !CONCEPT_STOPWORDS.has(c));
+      const olderConcepts = older.concepts.filter(c => !CONCEPT_STOPWORDS.has(c));
+      if (newerConcepts.length === 0 || olderConcepts.length === 0) continue;
+      if (conceptOverlapRatio(newerConcepts, olderConcepts) >= 0.5) {
         safeAddEdge(graph, `obs:${newer.id}`, `obs:${older.id}`, {
           type: 'supersedes',
           weight: 1,
