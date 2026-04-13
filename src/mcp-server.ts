@@ -1,6 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { appendFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import { openDatabase } from './loader.js';
 import { loadObservations, loadSessions } from './loader.js';
 import { buildGraph } from './graph.js';
@@ -21,6 +23,24 @@ import type {
 } from './types.js';
 
 let graph: GraphType;
+
+const LOG_DIR = join(process.env.HOME ?? '', '.claude-mem-graph');
+const LOG_FILE = join(LOG_DIR, 'usage.jsonl');
+
+function logUsage(tool: string, params: Record<string, unknown>, resultCount: number): void {
+  try {
+    mkdirSync(LOG_DIR, { recursive: true });
+    const entry = JSON.stringify({
+      ts: new Date().toISOString(),
+      tool,
+      params,
+      resultCount,
+    });
+    appendFileSync(LOG_FILE, entry + '\n');
+  } catch {
+    // non-fatal
+  }
+}
 
 function initGraph(): void {
   const db = openDatabase();
@@ -185,6 +205,7 @@ server.tool(
       maxSessions: max_sessions ?? 10,
       sinceDays: since_days ?? 30,
     });
+    logUsage('graph_context', { project, task_description, max_sessions, since_days }, result.observations.length);
     const text = formatContextResult(result.observations, result.sessionArcs);
     return { content: [{ type: 'text' as const, text }] };
   }
@@ -202,6 +223,7 @@ server.tool(
       observationId: observation_id,
       maxResults: max_results ?? 20,
     });
+    logUsage('graph_related', { observation_id, max_results }, Object.values(result.byEdgeType).flat().length);
     const text = formatRelatedResult(result.byEdgeType);
     return { content: [{ type: 'text' as const, text }] };
   }
@@ -215,6 +237,7 @@ server.tool(
   },
   async ({ observation_id }) => {
     const result = queryStaleness(graph, { observationId: observation_id });
+    logUsage('graph_staleness', { observation_id }, result.status === 'stale' ? 1 : 0);
     const text = formatStalenessResult(result.status, result.supersededBy, result.reason);
     return { content: [{ type: 'text' as const, text }] };
   }
@@ -230,6 +253,7 @@ server.tool(
   async ({ project, since }) => {
     const sinceMs = since ? new Date(since).getTime() : undefined;
     const entries = queryTimeline(graph, { project, since: sinceMs });
+    logUsage('graph_timeline', { project, since }, entries.length);
     const text = formatTimelineResult(entries);
     return { content: [{ type: 'text' as const, text }] };
   }
@@ -243,6 +267,7 @@ server.tool(
   },
   async ({ file_path }) => {
     const result = queryFileImpact(graph, { filePath: file_path });
+    logUsage('graph_file_impact', { file_path }, Object.values(result.byProject).flat().length);
     const text = formatFileImpactResult(result);
     return { content: [{ type: 'text' as const, text }] };
   }
@@ -261,6 +286,7 @@ server.tool(
     const buildTimeMs = Date.now() - start;
     const nodeCount = graph.order;
     const edgeCount = graph.size;
+    logUsage('graph_rebuild', {}, nodeCount);
     const text = `Rebuilt: ${nodeCount} nodes, ${edgeCount} edges in ${buildTimeMs}ms`;
     return { content: [{ type: 'text' as const, text }] };
   }

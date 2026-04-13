@@ -30114,6 +30114,10 @@ var StdioServerTransport = class {
   }
 };
 
+// src/mcp-server.ts
+var import_fs = require("fs");
+var import_path = require("path");
+
 // src/loader.ts
 var import_better_sqlite3 = __toESM(require("better-sqlite3"), 1);
 
@@ -34939,6 +34943,21 @@ function queryFileImpact(graph2, options) {
 
 // src/mcp-server.ts
 var graph;
+var LOG_DIR = (0, import_path.join)(process.env.HOME ?? "", ".claude-mem-graph");
+var LOG_FILE = (0, import_path.join)(LOG_DIR, "usage.jsonl");
+function logUsage(tool, params, resultCount) {
+  try {
+    (0, import_fs.mkdirSync)(LOG_DIR, { recursive: true });
+    const entry = JSON.stringify({
+      ts: (/* @__PURE__ */ new Date()).toISOString(),
+      tool,
+      params,
+      resultCount
+    });
+    (0, import_fs.appendFileSync)(LOG_FILE, entry + "\n");
+  } catch {
+  }
+}
 function initGraph() {
   const db = openDatabase();
   const observations = loadObservations(db);
@@ -35076,6 +35095,7 @@ server.tool(
       maxSessions: max_sessions ?? 10,
       sinceDays: since_days ?? 30
     });
+    logUsage("graph_context", { project, task_description, max_sessions, since_days }, result.observations.length);
     const text = formatContextResult(result.observations, result.sessionArcs);
     return { content: [{ type: "text", text }] };
   }
@@ -35092,6 +35112,7 @@ server.tool(
       observationId: observation_id,
       maxResults: max_results ?? 20
     });
+    logUsage("graph_related", { observation_id, max_results }, Object.values(result.byEdgeType).flat().length);
     const text = formatRelatedResult(result.byEdgeType);
     return { content: [{ type: "text", text }] };
   }
@@ -35104,6 +35125,7 @@ server.tool(
   },
   async ({ observation_id }) => {
     const result = queryStaleness(graph, { observationId: observation_id });
+    logUsage("graph_staleness", { observation_id }, result.status === "stale" ? 1 : 0);
     const text = formatStalenessResult(result.status, result.supersededBy, result.reason);
     return { content: [{ type: "text", text }] };
   }
@@ -35118,6 +35140,7 @@ server.tool(
   async ({ project, since }) => {
     const sinceMs = since ? new Date(since).getTime() : void 0;
     const entries = queryTimeline(graph, { project, since: sinceMs });
+    logUsage("graph_timeline", { project, since }, entries.length);
     const text = formatTimelineResult(entries);
     return { content: [{ type: "text", text }] };
   }
@@ -35130,6 +35153,7 @@ server.tool(
   },
   async ({ file_path }) => {
     const result = queryFileImpact(graph, { filePath: file_path });
+    logUsage("graph_file_impact", { file_path }, Object.values(result.byProject).flat().length);
     const text = formatFileImpactResult(result);
     return { content: [{ type: "text", text }] };
   }
@@ -35147,6 +35171,7 @@ server.tool(
     const buildTimeMs = Date.now() - start;
     const nodeCount = graph.order;
     const edgeCount = graph.size;
+    logUsage("graph_rebuild", {}, nodeCount);
     const text = `Rebuilt: ${nodeCount} nodes, ${edgeCount} edges in ${buildTimeMs}ms`;
     return { content: [{ type: "text", text }] };
   }
