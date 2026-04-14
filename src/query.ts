@@ -27,7 +27,7 @@ export function queryContext(
   graph: GraphType,
   options: QueryContextOptions,
 ): ContextResult {
-  const { project, taskDescription, maxSessions = 10, sinceDays = 30 } = options;
+  const { project, taskDescription, maxSessions = 50, sinceDays = 90 } = options;
 
   const cutoff = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
 
@@ -60,7 +60,7 @@ export function queryContext(
 
   const filtered = keywords.length > 0
     ? observations.filter(obs => {
-        const haystack = [obs.title, ...obs.concepts].join(' ').toLowerCase();
+        const haystack = [obs.title, obs.subtitle, obs.narrative, obs.text, obs.facts, ...obs.concepts].join(' ').toLowerCase();
         return keywords.some(k => haystack.includes(k));
       })
     : observations;

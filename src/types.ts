@@ -40,6 +40,10 @@ export interface Observation {
   project: string;
   type: ObservationRow['type'];
   title: string;
+  subtitle: string;
+  narrative: string;
+  text: string;
+  facts: string;
   concepts: string[];
   filesRead: string[];
   filesModified: string[];

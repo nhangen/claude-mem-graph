@@ -30142,6 +30142,10 @@ function toObservation(row) {
     project: row.project,
     type: row.type,
     title: row.title ?? `Observation #${row.id}`,
+    subtitle: row.subtitle ?? "",
+    narrative: row.narrative ?? "",
+    text: row.text ?? "",
+    facts: row.facts ?? "",
     concepts: parseJsonArray(row.concepts),
     filesRead: parseJsonArray(row.files_read),
     filesModified: parseJsonArray(row.files_modified),
@@ -34695,7 +34699,7 @@ function groupBy(items, key) {
 
 // src/query.ts
 function queryContext(graph2, options) {
-  const { project, taskDescription, maxSessions = 10, sinceDays = 30 } = options;
+  const { project, taskDescription, maxSessions = 50, sinceDays = 90 } = options;
   const cutoff = Date.now() - sinceDays * 24 * 60 * 60 * 1e3;
   const projectSessions = [];
   graph2.forEachNode((nodeKey, attrs) => {
@@ -34719,7 +34723,7 @@ function queryContext(graph2, options) {
   });
   const keywords = taskDescription ? taskDescription.toLowerCase().split(/\s+/).filter((k) => k.length > 2) : [];
   const filtered = keywords.length > 0 ? observations.filter((obs) => {
-    const haystack = [obs.title, ...obs.concepts].join(" ").toLowerCase();
+    const haystack = [obs.title, obs.subtitle, obs.narrative, obs.text, obs.facts, ...obs.concepts].join(" ").toLowerCase();
     return keywords.some((k) => haystack.includes(k));
   }) : observations;
   const supersededIds = /* @__PURE__ */ new Set();
