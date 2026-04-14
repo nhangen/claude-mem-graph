@@ -10,6 +10,10 @@ import type {
   StalenessResult,
   TimelineEntry,
   FileImpactResult,
+  LineageResult,
+  LineageStep,
+  ConflictsResult,
+  ConflictPair,
   NodeType,
   EdgeType,
 } from './types.js';
@@ -17,7 +21,7 @@ import type {
 // --- queryContext ---
 
 export interface QueryContextOptions {
-  project: string;
+  project?: string;
   taskDescription?: string;
   maxSessions?: number;
   sinceDays?: number;
@@ -27,7 +31,10 @@ export function queryContext(
   graph: GraphType,
   options: QueryContextOptions,
 ): ContextResult {
-  const { project, taskDescription, maxSessions = 50, sinceDays = 90 } = options;
+  const { project, taskDescription } = options;
+  const defaultMaxSessions = (!project && taskDescription) ? 500 : 50;
+  const maxSessions = options.maxSessions ?? defaultMaxSessions;
+  const sinceDays = options.sinceDays ?? (taskDescription ? 365 : 90);
 
   const cutoff = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
 
@@ -35,7 +42,7 @@ export function queryContext(
   graph.forEachNode((nodeKey, attrs) => {
     if (attrs.type !== 'session') return;
     const sess = attrs.data as Session;
-    if (sess.project !== project) return;
+    if (project && sess.project !== project) return;
     if (sess.startedAt < cutoff) return;
     projectSessions.push(sess);
   });
@@ -49,7 +56,7 @@ export function queryContext(
   graph.forEachNode((nodeKey, attrs) => {
     if (attrs.type !== 'observation') return;
     const obs = attrs.data as Observation;
-    if (obs.project !== project) return;
+    if (project && obs.project !== project) return;
     if (!memSessionIdSet.has(obs.sessionId)) return;
     observations.push(obs);
   });
@@ -367,4 +374,184 @@ export function queryFileImpact(
   });
 
   return { filePath, byProject };
+}
+
+// --- queryLineage ---
+
+export interface QueryLineageOptions {
+  observationId: number;
+  maxDepth?: number;
+}
+
+export function queryLineage(
+  graph: GraphType,
+  options: QueryLineageOptions,
+): LineageResult {
+  const { observationId, maxDepth = 20 } = options;
+  const startKey = `obs:${observationId}`;
+
+  if (!graph.hasNode(startKey)) {
+    return { chain: [], rootId: observationId };
+  }
+
+  const startAttrs = graph.getNodeAttributes(startKey);
+  const startObs = startAttrs.data as Observation;
+
+  const chain: LineageStep[] = [{
+    observation: startObs,
+    edgeType: 'led_to',
+    direction: 'root',
+  }];
+
+  const visited = new Set<string>([startKey]);
+  const causalEdges: Set<EdgeType> = new Set(['led_to', 'depends_on', 'supersedes']);
+
+  let current = startKey;
+  for (let depth = 0; depth < maxDepth; depth++) {
+    let foundPrev: { key: string; obs: Observation; edgeType: EdgeType } | null = null;
+
+    graph.forEachInEdge(current, (edge, attrs) => {
+      if (foundPrev) return;
+      if (!causalEdges.has(attrs.type as EdgeType)) return;
+      const sourceKey = graph.source(edge);
+      if (!sourceKey.startsWith('obs:')) return;
+      if (visited.has(sourceKey)) return;
+      const sourceAttrs = graph.getNodeAttributes(sourceKey);
+      if (sourceAttrs.type !== 'observation') return;
+      foundPrev = {
+        key: sourceKey,
+        obs: sourceAttrs.data as Observation,
+        edgeType: attrs.type as EdgeType,
+      };
+    });
+
+    if (!foundPrev) {
+      graph.forEachOutEdge(current, (edge, attrs) => {
+        if (foundPrev) return;
+        if (!causalEdges.has(attrs.type as EdgeType)) return;
+        const targetKey = graph.target(edge);
+        if (!targetKey.startsWith('obs:')) return;
+        if (visited.has(targetKey)) return;
+        const targetAttrs = graph.getNodeAttributes(targetKey);
+        if (targetAttrs.type !== 'observation') return;
+        const targetObs = targetAttrs.data as Observation;
+        if (targetObs.createdAt < (graph.getNodeAttributes(current).data as Observation).createdAt) {
+          foundPrev = {
+            key: targetKey,
+            obs: targetObs,
+            edgeType: attrs.type as EdgeType,
+          };
+        }
+      });
+    }
+
+    if (!foundPrev) break;
+
+    visited.add(foundPrev.key);
+    chain.push({
+      observation: foundPrev.obs,
+      edgeType: foundPrev.edgeType,
+      direction: 'backward',
+    });
+    current = foundPrev.key;
+  }
+
+  chain.reverse();
+  const rootId = chain.length > 0 ? chain[0].observation.id : observationId;
+
+  return { chain, rootId };
+}
+
+// --- queryConflicts ---
+
+export interface QueryConflictsOptions {
+  observationId: number;
+}
+
+const CONFLICT_STOPWORDS = new Set([
+  'how-it-works', 'pattern', 'what-changed', 'problem-solution', 'gotcha',
+  'trade-off', 'why-it-exists', 'best-practice',
+]);
+
+export function queryConflicts(
+  graph: GraphType,
+  options: QueryConflictsOptions,
+): ConflictsResult {
+  const { observationId } = options;
+  const startKey = `obs:${observationId}`;
+
+  if (!graph.hasNode(startKey)) {
+    return { pairs: [] };
+  }
+
+  const startAttrs = graph.getNodeAttributes(startKey);
+  const startObs = startAttrs.data as Observation;
+  const pairs: ConflictPair[] = [];
+  const seen = new Set<number>();
+
+  graph.forEachInEdge(startKey, (edge, attrs) => {
+    if (attrs.type !== 'supersedes') return;
+    const sourceKey = graph.source(edge);
+    if (!sourceKey.startsWith('obs:')) return;
+    const sourceAttrs = graph.getNodeAttributes(sourceKey);
+    const superseder = sourceAttrs.data as Observation;
+    if (seen.has(superseder.id)) return;
+    seen.add(superseder.id);
+    const shared = startObs.concepts.filter(c =>
+      !CONFLICT_STOPWORDS.has(c) && superseder.concepts.includes(c)
+    );
+    pairs.push({
+      current: superseder,
+      conflicting: startObs,
+      relationship: 'supersedes',
+      sharedConcepts: shared,
+    });
+  });
+
+  graph.forEachOutEdge(startKey, (edge, attrs) => {
+    if (attrs.type !== 'supersedes') return;
+    const targetKey = graph.target(edge);
+    if (!targetKey.startsWith('obs:')) return;
+    const targetAttrs = graph.getNodeAttributes(targetKey);
+    const superseded = targetAttrs.data as Observation;
+    if (seen.has(superseded.id)) return;
+    seen.add(superseded.id);
+    const shared = startObs.concepts.filter(c =>
+      !CONFLICT_STOPWORDS.has(c) && superseded.concepts.includes(c)
+    );
+    pairs.push({
+      current: startObs,
+      conflicting: superseded,
+      relationship: 'supersedes',
+      sharedConcepts: shared,
+    });
+  });
+
+  const startConcepts = startObs.concepts.filter(c => !CONFLICT_STOPWORDS.has(c));
+  if (startConcepts.length > 0) {
+    graph.forEachNode((nodeKey, attrs) => {
+      if (attrs.type !== 'observation') return;
+      const obs = attrs.data as Observation;
+      if (obs.id === observationId) return;
+      if (seen.has(obs.id)) return;
+      const obsConcepts = obs.concepts.filter(c => !CONFLICT_STOPWORDS.has(c));
+      if (obsConcepts.length === 0) return;
+      const shared = startConcepts.filter(c => obsConcepts.includes(c));
+      const overlapRatio = shared.length / Math.min(startConcepts.length, obsConcepts.length);
+      if (overlapRatio < 0.5) return;
+      if (obs.type !== startObs.type) return;
+      const [newer, older] = obs.createdAt > startObs.createdAt
+        ? [obs, startObs]
+        : [startObs, obs];
+      seen.add(obs.id);
+      pairs.push({
+        current: newer,
+        conflicting: older,
+        relationship: 'concept_overlap',
+        sharedConcepts: shared,
+      });
+    });
+  }
+
+  return { pairs };
 }

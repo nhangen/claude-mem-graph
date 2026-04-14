@@ -34699,13 +34699,16 @@ function groupBy(items, key) {
 
 // src/query.ts
 function queryContext(graph2, options) {
-  const { project, taskDescription, maxSessions = 50, sinceDays = 90 } = options;
+  const { project, taskDescription } = options;
+  const defaultMaxSessions = !project && taskDescription ? 500 : 50;
+  const maxSessions = options.maxSessions ?? defaultMaxSessions;
+  const sinceDays = options.sinceDays ?? (taskDescription ? 365 : 90);
   const cutoff = Date.now() - sinceDays * 24 * 60 * 60 * 1e3;
   const projectSessions = [];
   graph2.forEachNode((nodeKey, attrs) => {
     if (attrs.type !== "session") return;
     const sess = attrs.data;
-    if (sess.project !== project) return;
+    if (project && sess.project !== project) return;
     if (sess.startedAt < cutoff) return;
     projectSessions.push(sess);
   });
@@ -34717,7 +34720,7 @@ function queryContext(graph2, options) {
   graph2.forEachNode((nodeKey, attrs) => {
     if (attrs.type !== "observation") return;
     const obs = attrs.data;
-    if (obs.project !== project) return;
+    if (project && obs.project !== project) return;
     if (!memSessionIdSet.has(obs.sessionId)) return;
     observations.push(obs);
   });
@@ -34944,6 +34947,151 @@ function queryFileImpact(graph2, options) {
   });
   return { filePath, byProject };
 }
+function queryLineage(graph2, options) {
+  const { observationId, maxDepth = 20 } = options;
+  const startKey = `obs:${observationId}`;
+  if (!graph2.hasNode(startKey)) {
+    return { chain: [], rootId: observationId };
+  }
+  const startAttrs = graph2.getNodeAttributes(startKey);
+  const startObs = startAttrs.data;
+  const chain2 = [{
+    observation: startObs,
+    edgeType: "led_to",
+    direction: "root"
+  }];
+  const visited = /* @__PURE__ */ new Set([startKey]);
+  const causalEdges = /* @__PURE__ */ new Set(["led_to", "depends_on", "supersedes"]);
+  let current = startKey;
+  for (let depth = 0; depth < maxDepth; depth++) {
+    let foundPrev = null;
+    graph2.forEachInEdge(current, (edge, attrs) => {
+      if (foundPrev) return;
+      if (!causalEdges.has(attrs.type)) return;
+      const sourceKey = graph2.source(edge);
+      if (!sourceKey.startsWith("obs:")) return;
+      if (visited.has(sourceKey)) return;
+      const sourceAttrs = graph2.getNodeAttributes(sourceKey);
+      if (sourceAttrs.type !== "observation") return;
+      foundPrev = {
+        key: sourceKey,
+        obs: sourceAttrs.data,
+        edgeType: attrs.type
+      };
+    });
+    if (!foundPrev) {
+      graph2.forEachOutEdge(current, (edge, attrs) => {
+        if (foundPrev) return;
+        if (!causalEdges.has(attrs.type)) return;
+        const targetKey = graph2.target(edge);
+        if (!targetKey.startsWith("obs:")) return;
+        if (visited.has(targetKey)) return;
+        const targetAttrs = graph2.getNodeAttributes(targetKey);
+        if (targetAttrs.type !== "observation") return;
+        const targetObs = targetAttrs.data;
+        if (targetObs.createdAt < graph2.getNodeAttributes(current).data.createdAt) {
+          foundPrev = {
+            key: targetKey,
+            obs: targetObs,
+            edgeType: attrs.type
+          };
+        }
+      });
+    }
+    if (!foundPrev) break;
+    visited.add(foundPrev.key);
+    chain2.push({
+      observation: foundPrev.obs,
+      edgeType: foundPrev.edgeType,
+      direction: "backward"
+    });
+    current = foundPrev.key;
+  }
+  chain2.reverse();
+  const rootId = chain2.length > 0 ? chain2[0].observation.id : observationId;
+  return { chain: chain2, rootId };
+}
+var CONFLICT_STOPWORDS = /* @__PURE__ */ new Set([
+  "how-it-works",
+  "pattern",
+  "what-changed",
+  "problem-solution",
+  "gotcha",
+  "trade-off",
+  "why-it-exists",
+  "best-practice"
+]);
+function queryConflicts(graph2, options) {
+  const { observationId } = options;
+  const startKey = `obs:${observationId}`;
+  if (!graph2.hasNode(startKey)) {
+    return { pairs: [] };
+  }
+  const startAttrs = graph2.getNodeAttributes(startKey);
+  const startObs = startAttrs.data;
+  const pairs = [];
+  const seen = /* @__PURE__ */ new Set();
+  graph2.forEachInEdge(startKey, (edge, attrs) => {
+    if (attrs.type !== "supersedes") return;
+    const sourceKey = graph2.source(edge);
+    if (!sourceKey.startsWith("obs:")) return;
+    const sourceAttrs = graph2.getNodeAttributes(sourceKey);
+    const superseder = sourceAttrs.data;
+    if (seen.has(superseder.id)) return;
+    seen.add(superseder.id);
+    const shared = startObs.concepts.filter(
+      (c) => !CONFLICT_STOPWORDS.has(c) && superseder.concepts.includes(c)
+    );
+    pairs.push({
+      current: superseder,
+      conflicting: startObs,
+      relationship: "supersedes",
+      sharedConcepts: shared
+    });
+  });
+  graph2.forEachOutEdge(startKey, (edge, attrs) => {
+    if (attrs.type !== "supersedes") return;
+    const targetKey = graph2.target(edge);
+    if (!targetKey.startsWith("obs:")) return;
+    const targetAttrs = graph2.getNodeAttributes(targetKey);
+    const superseded = targetAttrs.data;
+    if (seen.has(superseded.id)) return;
+    seen.add(superseded.id);
+    const shared = startObs.concepts.filter(
+      (c) => !CONFLICT_STOPWORDS.has(c) && superseded.concepts.includes(c)
+    );
+    pairs.push({
+      current: startObs,
+      conflicting: superseded,
+      relationship: "supersedes",
+      sharedConcepts: shared
+    });
+  });
+  const startConcepts = startObs.concepts.filter((c) => !CONFLICT_STOPWORDS.has(c));
+  if (startConcepts.length > 0) {
+    graph2.forEachNode((nodeKey, attrs) => {
+      if (attrs.type !== "observation") return;
+      const obs = attrs.data;
+      if (obs.id === observationId) return;
+      if (seen.has(obs.id)) return;
+      const obsConcepts = obs.concepts.filter((c) => !CONFLICT_STOPWORDS.has(c));
+      if (obsConcepts.length === 0) return;
+      const shared = startConcepts.filter((c) => obsConcepts.includes(c));
+      const overlapRatio = shared.length / Math.min(startConcepts.length, obsConcepts.length);
+      if (overlapRatio < 0.5) return;
+      if (obs.type !== startObs.type) return;
+      const [newer, older] = obs.createdAt > startObs.createdAt ? [obs, startObs] : [startObs, obs];
+      seen.add(obs.id);
+      pairs.push({
+        current: newer,
+        conflicting: older,
+        relationship: "concept_overlap",
+        sharedConcepts: shared
+      });
+    });
+  }
+  return { pairs };
+}
 
 // src/mcp-server.ts
 var graph;
@@ -35075,6 +35223,43 @@ function formatFileImpactResult(result) {
   }
   return lines.join("\n");
 }
+function formatLineageResult(chain2, rootId) {
+  if (chain2.length === 0) {
+    return `No lineage found for observation #${rootId}.`;
+  }
+  const lines = [];
+  lines.push(`## Causal Chain (root: #${rootId})`);
+  lines.push("");
+  for (let i = 0; i < chain2.length; i++) {
+    const step = chain2[i];
+    const obs = step.observation;
+    const prefix = i === 0 ? "\u{1F535}" : "\u2192";
+    const edgeLabel = step.direction === "root" ? "(root)" : `via ${step.edgeType}`;
+    lines.push(`${prefix} **#${obs.id}** ${obs.title} ${edgeLabel}`);
+    lines.push(`  - Project: ${obs.project}  Type: ${obs.type}  Date: ${formatDate(obs.createdAt)}`);
+    if (obs.concepts.length > 0) {
+      lines.push(`  - Concepts: ${obs.concepts.join(", ")}`);
+    }
+  }
+  return lines.join("\n");
+}
+function formatConflictsResult(pairs) {
+  if (pairs.length === 0) {
+    return "No conflicts detected.";
+  }
+  const lines = [];
+  lines.push(`## Conflicts Found: ${pairs.length}`);
+  lines.push("");
+  for (const pair of pairs) {
+    lines.push(`### ${pair.relationship === "supersedes" ? "Supersedes" : "Concept Overlap"}`);
+    lines.push(`- **Current:** #${pair.current.id} \u2014 ${pair.current.title} (${formatDate(pair.current.createdAt)})`);
+    lines.push(`- **Conflicting:** #${pair.conflicting.id} \u2014 ${pair.conflicting.title} (${formatDate(pair.conflicting.createdAt)})`);
+    lines.push(`- **Shared concepts:** ${pair.sharedConcepts.join(", ")}`);
+    lines.push(`- **Resolution:** #${pair.current.id} is newer and should be treated as authoritative`);
+    lines.push("");
+  }
+  return lines.join("\n");
+}
 try {
   initGraph();
 } catch (err) {
@@ -35085,19 +35270,19 @@ try {
 var server = new McpServer({ name: "claude-mem-graph", version: "0.1.0" });
 server.tool(
   "graph_context",
-  "Retrieve recent context for a project, scored by recency and relevance. Optionally filter by task description.",
+  "Retrieve recent context scored by recency and relevance. Optionally scope to a project or search cross-project. When task_description is provided, defaults to 365 days lookback.",
   {
-    project: external_exports3.string().describe("Project name to query"),
+    project: external_exports3.string().optional().describe("Project name to scope results. Omit to search all projects."),
     task_description: external_exports3.string().optional().describe("Optional task description to filter observations by keyword"),
     max_sessions: external_exports3.number().optional().describe("Maximum number of recent sessions to include (default 10)"),
-    since_days: external_exports3.number().optional().describe("How many days back to look (default 30)")
+    since_days: external_exports3.number().optional().describe("How many days back to look (default 90, or 365 when task_description is set)")
   },
   async ({ project, task_description, max_sessions, since_days }) => {
     const result = queryContext(graph, {
       project,
       taskDescription: task_description,
       maxSessions: max_sessions ?? 10,
-      sinceDays: since_days ?? 30
+      sinceDays: since_days
     });
     logUsage("graph_context", { project, task_description, max_sessions, since_days }, result.observations.length);
     const text = formatContextResult(result.observations, result.sessionArcs);
@@ -35159,6 +35344,36 @@ server.tool(
     const result = queryFileImpact(graph, { filePath: file_path });
     logUsage("graph_file_impact", { file_path }, Object.values(result.byProject).flat().length);
     const text = formatFileImpactResult(result);
+    return { content: [{ type: "text", text }] };
+  }
+);
+server.tool(
+  "graph_lineage",
+  "Walk backward through causal edges (led_to, depends_on, supersedes) to build a reasoning chain for an observation.",
+  {
+    observation_id: external_exports3.number().describe("ID of the observation to trace lineage for"),
+    max_depth: external_exports3.number().optional().describe("Maximum chain depth (default 20)")
+  },
+  async ({ observation_id, max_depth }) => {
+    const result = queryLineage(graph, {
+      observationId: observation_id,
+      maxDepth: max_depth ?? 20
+    });
+    logUsage("graph_lineage", { observation_id, max_depth }, result.chain.length);
+    const text = formatLineageResult(result.chain, result.rootId);
+    return { content: [{ type: "text", text }] };
+  }
+);
+server.tool(
+  "graph_conflicts",
+  "Find observations that conflict with or supersede a given observation. Detects supersedes edges and concept-overlap conflicts.",
+  {
+    observation_id: external_exports3.number().describe("ID of the observation to find conflicts for")
+  },
+  async ({ observation_id }) => {
+    const result = queryConflicts(graph, { observationId: observation_id });
+    logUsage("graph_conflicts", { observation_id }, result.pairs.length);
+    const text = formatConflictsResult(result.pairs);
     return { content: [{ type: "text", text }] };
   }
 );

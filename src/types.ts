@@ -124,6 +124,28 @@ export interface FileImpactResult {
   byProject: Record<string, Observation[]>;
 }
 
+export interface LineageStep {
+  observation: Observation;
+  edgeType: EdgeType;
+  direction: 'backward' | 'root';
+}
+
+export interface LineageResult {
+  chain: LineageStep[];
+  rootId: number;
+}
+
+export interface ConflictPair {
+  current: Observation;
+  conflicting: Observation;
+  relationship: 'supersedes' | 'concept_overlap';
+  sharedConcepts: string[];
+}
+
+export interface ConflictsResult {
+  pairs: ConflictPair[];
+}
+
 export interface RebuildResult {
   nodeCount: number;
   edgeCount: number;

@@ -13,6 +13,8 @@ import {
   queryStaleness,
   queryTimeline,
   queryFileImpact,
+  queryLineage,
+  queryConflicts,
 } from '../src/query.js';
 
 function createTestDb(): Database.Database {
@@ -233,5 +235,107 @@ describe('queryFileImpact', () => {
     const result = queryFileImpact(graph, { filePath: 'does/not/exist.php' });
     expect(result.filePath).toBe('does/not/exist.php');
     expect(Object.keys(result.byProject)).toHaveLength(0);
+  });
+});
+
+describe('queryContext cross-project', () => {
+  it('returns observations from multiple projects when no project specified', () => {
+    const result = queryContext(graph, { sinceDays: 400 });
+    const projects = new Set(result.observations.map(a => a.observation.project));
+    expect(projects.size).toBeGreaterThan(1);
+  });
+
+  it('keyword search works cross-project', () => {
+    const result = queryContext(graph, {
+      sinceDays: 400,
+      taskDescription: 'hubspot',
+    });
+    expect(result.observations.length).toBeGreaterThan(0);
+    for (const a of result.observations) {
+      const haystack = [a.observation.title, ...a.observation.concepts].join(' ').toLowerCase();
+      expect(haystack).toContain('hubspot');
+    }
+  });
+
+  it('uses wider time window when taskDescription is present vs absent', () => {
+    const withDesc = queryContext(graph, {
+      project: 'wp-content',
+      taskDescription: 'hubspot',
+      sinceDays: 400,
+    });
+    const withoutDesc = queryContext(graph, {
+      project: 'wp-content',
+      sinceDays: 0,
+    });
+    expect(withDesc.observations.length).toBeGreaterThan(withoutDesc.observations.length);
+  });
+
+  it('still respects explicit sinceDays even with taskDescription', () => {
+    const result = queryContext(graph, {
+      project: 'wp-content',
+      taskDescription: 'hubspot',
+      sinceDays: 0,
+    });
+    expect(result.observations).toHaveLength(0);
+  });
+});
+
+describe('queryLineage', () => {
+  it('returns a chain for an observation with led_to edges', () => {
+    const result = queryLineage(graph, { observationId: 2 });
+    expect(result.chain.length).toBeGreaterThanOrEqual(1);
+    const ids = result.chain.map(s => s.observation.id);
+    expect(ids).toContain(2);
+  });
+
+  it('obs:1 (discovery) led_to obs:2 (decision) should appear in lineage of obs:2', () => {
+    const result = queryLineage(graph, { observationId: 2 });
+    const ids = result.chain.map(s => s.observation.id);
+    expect(ids).toContain(1);
+    expect(ids).toContain(2);
+    expect(ids.indexOf(1)).toBeLessThan(ids.indexOf(2));
+  });
+
+  it('returns single-element chain for an observation with no causal predecessors', () => {
+    const result = queryLineage(graph, { observationId: 5 });
+    expect(result.chain.length).toBeGreaterThanOrEqual(1);
+    expect(result.chain[0].observation.id).toBe(5);
+  });
+
+  it('returns empty chain for unknown observation', () => {
+    const result = queryLineage(graph, { observationId: 9999 });
+    expect(result.chain).toHaveLength(0);
+  });
+});
+
+describe('queryConflicts', () => {
+  it('obs:2 shows supersedes conflict with obs:4', () => {
+    const result = queryConflicts(graph, { observationId: 2 });
+    expect(result.pairs.length).toBeGreaterThan(0);
+    const supersededPair = result.pairs.find(p => p.relationship === 'supersedes');
+    expect(supersededPair).toBeDefined();
+    expect(supersededPair!.current.id).toBe(4);
+    expect(supersededPair!.conflicting.id).toBe(2);
+  });
+
+  it('obs:4 shows supersedes conflict with obs:2', () => {
+    const result = queryConflicts(graph, { observationId: 4 });
+    const supersededPair = result.pairs.find(
+      p => p.relationship === 'supersedes' && p.conflicting.id === 2
+    );
+    expect(supersededPair).toBeDefined();
+    expect(supersededPair!.current.id).toBe(4);
+  });
+
+  it('includes shared concepts in conflict pairs', () => {
+    const result = queryConflicts(graph, { observationId: 2 });
+    for (const pair of result.pairs) {
+      expect(pair.sharedConcepts.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('returns empty for unknown observation', () => {
+    const result = queryConflicts(graph, { observationId: 9999 });
+    expect(result.pairs).toHaveLength(0);
   });
 });
