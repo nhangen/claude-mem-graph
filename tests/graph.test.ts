@@ -40,8 +40,8 @@ beforeAll(() => {
 });
 
 describe('nodes', () => {
-  it('creates observation nodes for all 7 observations', () => {
-    for (let i = 1; i <= 7; i++) {
+  it('creates observation nodes for all 8 observations', () => {
+    for (let i = 1; i <= 8; i++) {
       expect(graph.hasNode(`obs:${i}`)).toBe(true);
     }
   });
@@ -77,7 +77,7 @@ describe('produced_by edges', () => {
   });
 
   it('each observation has exactly one produced_by edge', () => {
-    for (let i = 1; i <= 7; i++) {
+    for (let i = 1; i <= 8; i++) {
       const edges = graph.filterOutEdges(`obs:${i}`, (_e, attrs) => attrs.type === 'produced_by');
       expect(edges).toHaveLength(1);
     }
@@ -181,5 +181,34 @@ describe('continues edges', () => {
     const edges = graph.filterOutEdges('sess:sess-d', (_e, attrs) => attrs.type === 'continues');
     const targets = edges.map(e => graph.target(e));
     expect(targets).not.toContain('sess:sess-b');
+  });
+});
+
+describe('informed_by edges', () => {
+  it('obs:8 informed_by obs:1 (narrative mentions "v1 API deprecated" matching obs:1 title keywords)', () => {
+    const edges = graph.filterOutEdges('obs:8', (_e, attrs) => attrs.type === 'informed_by');
+    const targets = edges.map(e => graph.target(e));
+    expect(targets).toContain('obs:1');
+  });
+
+  it('informed_by edge from obs:8 to obs:1 has weight >= 2 (keyword overlap count)', () => {
+    const edges = graph.filterOutEdges('obs:8', (_e, attrs) => attrs.type === 'informed_by');
+    const toObs1 = edges.find(e => graph.target(e) === 'obs:1');
+    expect(toObs1).toBeDefined();
+    const weight = graph.getEdgeAttribute(toObs1!, 'weight') as number;
+    expect(weight).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not create informed_by edges between observations in different projects', () => {
+    const edges = graph.filterOutEdges('obs:8', (_e, attrs) => attrs.type === 'informed_by');
+    const targets = edges.map(e => graph.target(e));
+    expect(targets).not.toContain('obs:5');
+    expect(targets).not.toContain('obs:6');
+  });
+
+  it('does not create informed_by edge where a led_to or depends_on edge already exists', () => {
+    const informedByEdges = graph.filterOutEdges('obs:1', (_e, attrs) => attrs.type === 'informed_by');
+    const targets = informedByEdges.map(e => graph.target(e));
+    expect(targets).not.toContain('obs:2');
   });
 });

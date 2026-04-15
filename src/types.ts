@@ -64,7 +64,7 @@ export interface Session {
 
 export type EdgeType =
   | 'produced_by' | 'led_to' | 'supersedes' | 'relates_to'
-  | 'touches' | 'part_of' | 'co_occurs' | 'depends_on' | 'continues';
+  | 'touches' | 'part_of' | 'co_occurs' | 'depends_on' | 'continues' | 'informed_by';
 
 export interface EdgeAttributes {
   type: EdgeType;

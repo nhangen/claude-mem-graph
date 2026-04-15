@@ -34457,6 +34457,7 @@ function buildGraph(observations, sessions) {
   addCoOccursEdges(graph2, observations);
   addDependsOnEdges(graph2, observations);
   addContinuesEdges(graph2, observations, sessions);
+  inferNarrativeEdges(graph2, observations);
   return graph2;
 }
 function safeAddEdge(graph2, from, to, attrs) {
@@ -34682,6 +34683,155 @@ function addContinuesEdges(graph2, observations, sessions) {
           type: "continues",
           weight: 1
         });
+      }
+    }
+  }
+}
+var CAUSAL_PHRASES = [
+  "because",
+  "due to",
+  "in response to",
+  "to address",
+  "based on",
+  "as a result of",
+  "triggered by",
+  "after discovering",
+  "following the",
+  "which caused",
+  "to fix",
+  "to resolve",
+  "stemming from"
+];
+var NARRATIVE_STOPWORDS = /* @__PURE__ */ new Set([
+  "the",
+  "this",
+  "that",
+  "with",
+  "from",
+  "were",
+  "been",
+  "have",
+  "has",
+  "had",
+  "was",
+  "for",
+  "are",
+  "but",
+  "not",
+  "you",
+  "all",
+  "can",
+  "her",
+  "one",
+  "our",
+  "out",
+  "its",
+  "also",
+  "into",
+  "more",
+  "some",
+  "such",
+  "than",
+  "them",
+  "then",
+  "only",
+  "when",
+  "will",
+  "each",
+  "make",
+  "like",
+  "over",
+  "after",
+  "which",
+  "their",
+  "would",
+  "about",
+  "these",
+  "other",
+  "could",
+  "being",
+  "first",
+  "using",
+  "where",
+  "while",
+  "there",
+  "should",
+  "still",
+  "does",
+  "both",
+  "they",
+  "what",
+  "been"
+]);
+function extractKeywords(text) {
+  return text.toLowerCase().split(/[\s,.:;()\[\]{}"'!?\/\\]+/).filter((w) => w.length > 3 && !NARRATIVE_STOPWORDS.has(w));
+}
+function extractReasonClauses(narrative) {
+  const clauses = [];
+  const lower = narrative.toLowerCase();
+  for (const phrase of CAUSAL_PHRASES) {
+    let start = 0;
+    while (true) {
+      const idx = lower.indexOf(phrase, start);
+      if (idx === -1) break;
+      const clauseStart = idx + phrase.length;
+      const remaining = narrative.slice(clauseStart);
+      const boundaryMatch = remaining.match(/[.;]/);
+      const end = boundaryMatch?.index !== void 0 ? Math.min(boundaryMatch.index, 150) : Math.min(remaining.length, 150);
+      const clause = remaining.slice(0, end).trim();
+      if (clause.length > 0) clauses.push(clause);
+      start = idx + 1;
+    }
+  }
+  return clauses;
+}
+function hasEdgeBetween(graph2, fromKey, toKey, types) {
+  if (!graph2.hasNode(fromKey) || !graph2.hasNode(toKey)) return false;
+  const edges = graph2.edges(fromKey, toKey);
+  return edges.some((e) => types.includes(graph2.getEdgeAttribute(e, "type")));
+}
+function inferNarrativeEdges(graph2, observations) {
+  const titleIndex = /* @__PURE__ */ new Map();
+  for (const obs of observations) {
+    if (!obs.title) continue;
+    const keywords = extractKeywords(obs.title);
+    for (const kw of keywords) {
+      const set2 = titleIndex.get(kw) ?? /* @__PURE__ */ new Set();
+      set2.add(obs.id);
+      titleIndex.set(kw, set2);
+    }
+  }
+  const obsById = /* @__PURE__ */ new Map();
+  for (const obs of observations) obsById.set(obs.id, obs);
+  const MS_24H = 24 * 60 * 60 * 1e3;
+  for (const obs of observations) {
+    if (!obs.narrative) continue;
+    const clauses = extractReasonClauses(obs.narrative);
+    if (clauses.length === 0) continue;
+    for (const clause of clauses) {
+      const clauseKeywords = extractKeywords(clause);
+      if (clauseKeywords.length === 0) continue;
+      const candidateCounts = /* @__PURE__ */ new Map();
+      for (const kw of clauseKeywords) {
+        const matches = titleIndex.get(kw);
+        if (!matches) continue;
+        for (const matchId of matches) {
+          if (matchId === obs.id) continue;
+          candidateCounts.set(matchId, (candidateCounts.get(matchId) ?? 0) + 1);
+        }
+      }
+      for (const [candidateId, overlap] of candidateCounts) {
+        if (overlap < 2) continue;
+        const candidate = obsById.get(candidateId);
+        if (!candidate) continue;
+        const sameSession = candidate.sessionId === obs.sessionId;
+        const sameProject = candidate.project === obs.project;
+        const within24h = Math.abs(obs.createdAt - candidate.createdAt) <= MS_24H;
+        if (!sameSession && !(sameProject && within24h)) continue;
+        const fromKey = `obs:${obs.id}`;
+        const toKey = `obs:${candidateId}`;
+        if (hasEdgeBetween(graph2, fromKey, toKey, ["led_to", "depends_on"])) continue;
+        safeAddEdge(graph2, fromKey, toKey, { type: "informed_by", weight: overlap });
       }
     }
   }

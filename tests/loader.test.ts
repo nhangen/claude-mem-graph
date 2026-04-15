@@ -51,7 +51,7 @@ describe('loadObservations', () => {
   it('loads and parses all observations with JSON fields', () => {
     const { db } = createTestDb();
     const observations = loadObservations(db);
-    expect(observations).toHaveLength(7);
+    expect(observations).toHaveLength(8);
     const obs1 = observations.find(o => o.id === 1)!;
     expect(obs1.title).toBe('HubSpot v1 API deprecated');
     expect(obs1.type).toBe('discovery');

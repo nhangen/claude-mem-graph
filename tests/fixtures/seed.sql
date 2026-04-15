@@ -91,3 +91,10 @@ INSERT INTO observations (id, memory_session_id, project, type, title, concepts,
 VALUES (7, 'mem-d', 'wp-content', 'discovery', 'Batch API rate limits documented',
   '["hubspot","batch-api","rate-limits"]', '["src/HubSpot/V3Client.php"]', '[]', 1,
   '2026-04-03T14:30:00Z', 1743694200000, 0);
+
+INSERT INTO observations (id, memory_session_id, project, type, title, narrative, concepts, files_read, files_modified, prompt_number, created_at, created_at_epoch, relevance_count)
+VALUES (8, 'mem-a', 'wp-content', 'bugfix', 'Fixed HubSpot API timeout handling',
+  'Fixed the timeout issue because the HubSpot v1 API deprecated resource was returning 504 errors instead of clean deprecation notices. Based on the discovery that the API was deprecated, the fix adds retry logic with exponential backoff.',
+  '["hubspot","error-handling"]',
+  '["src/HubSpot/Client.php"]', '["src/HubSpot/Client.php"]', 3,
+  '2026-04-01T11:30:00Z', 1743510600000, 0);
