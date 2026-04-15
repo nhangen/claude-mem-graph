@@ -4,13 +4,13 @@
     "name": "nhangen"
   },
   "metadata": {
-    "description": "Graph-aware context retrieval over claude-mem observations"
+    "description": "Causal tracing layer over claude-mem observations"
   },
   "plugins": [
     {
       "name": "claude-mem-graph",
       "source": "./",
-      "description": "Graph-aware context retrieval over claude-mem observations. Builds an in-memory knowledge graph with 9 inferred edge types for relationship-aware queries, staleness detection, session arc tracking, and cross-project file impact analysis.",
+      "description": "Causal tracing layer over claude-mem. Extracts informed_by edges from observation narratives to trace what led to what. Cross-project search, session arc tracking, file history. 5 MCP tools, 10 edge types.",
       "version": "0.1.0",
       "category": "analytics"
     }

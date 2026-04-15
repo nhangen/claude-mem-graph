@@ -1,7 +1,7 @@
 {
   "name": "claude-mem-graph",
   "version": "0.1.0",
-  "description": "Graph-aware context retrieval over claude-mem observations",
+  "description": "Causal tracing layer over claude-mem. Extracts informed_by edges from observation narratives to trace what led to what. 5 MCP tools, 10 edge types.",
   "author": {
     "name": "nhangen"
   },
