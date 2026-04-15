@@ -25,12 +25,16 @@ let graph: GraphType;
 
 const LOG_DIR = join(process.env.HOME ?? '', '.claude-mem-graph');
 const LOG_FILE = join(LOG_DIR, 'usage.jsonl');
+const SESSION_ID = process.env.SESSION_ID ?? `srv-${Date.now()}`;
+const CWD = process.env.CWD ?? process.cwd();
 
 function logUsage(tool: string, params: Record<string, unknown>, resultCount: number): void {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
     const entry = JSON.stringify({
       ts: new Date().toISOString(),
+      sessionId: SESSION_ID,
+      cwd: CWD,
       tool,
       params,
       resultCount,

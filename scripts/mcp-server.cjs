@@ -35072,11 +35072,15 @@ function queryFileImpact(graph2, options) {
 var graph;
 var LOG_DIR = (0, import_path.join)(process.env.HOME ?? "", ".claude-mem-graph");
 var LOG_FILE = (0, import_path.join)(LOG_DIR, "usage.jsonl");
+var SESSION_ID = process.env.SESSION_ID ?? `srv-${Date.now()}`;
+var CWD = process.env.CWD ?? process.cwd();
 function logUsage(tool, params, resultCount) {
   try {
     (0, import_fs.mkdirSync)(LOG_DIR, { recursive: true });
     const entry = JSON.stringify({
       ts: (/* @__PURE__ */ new Date()).toISOString(),
+      sessionId: SESSION_ID,
+      cwd: CWD,
       tool,
       params,
       resultCount
