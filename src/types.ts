@@ -1,4 +1,4 @@
-// --- Database row types (match claude-mem schema v24-v26) ---
+// --- Database row types (match claude-mem schema v24-v30) ---
 
 export interface ObservationRow {
   id: number;
@@ -152,5 +152,5 @@ export interface RebuildResult {
   buildTimeMs: number;
 }
 
-export const SUPPORTED_SCHEMA_VERSIONS = { min: 24, max: 26 } as const;
+export const SUPPORTED_SCHEMA_VERSIONS = { min: 24, max: 30 } as const;
 export const DEFAULT_DB_PATH = `${process.env.HOME}/.claude-mem/claude-mem.db`;
