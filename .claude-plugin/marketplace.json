@@ -11,7 +11,7 @@
       "name": "claude-mem-graph",
       "source": "./",
       "description": "Causal tracing layer over claude-mem. Extracts informed_by edges from observation narratives to trace what led to what. Cross-project search, session arc tracking, file history. 5 MCP tools, 10 edge types.",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "category": "analytics"
     }
   ]

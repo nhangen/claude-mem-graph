@@ -1,6 +1,6 @@
 {
   "name": "claude-mem-graph",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Causal tracing layer over claude-mem. Extracts informed_by edges from observation narratives to trace what led to what. 5 MCP tools, 10 edge types.",
   "author": {
     "name": "nhangen"
