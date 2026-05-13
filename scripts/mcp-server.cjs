@@ -30122,7 +30122,7 @@ var import_path = require("path");
 var import_better_sqlite3 = __toESM(require("better-sqlite3"), 1);
 
 // src/types.ts
-var SUPPORTED_SCHEMA_VERSIONS = { min: 24, max: 26 };
+var SUPPORTED_SCHEMA_VERSIONS = { min: 24, max: 30 };
 var DEFAULT_DB_PATH = `${process.env.HOME}/.claude-mem/claude-mem.db`;
 
 // src/loader.ts

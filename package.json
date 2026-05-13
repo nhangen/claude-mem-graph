@@ -1,6 +1,6 @@
 {
   "name": "claude-mem-graph",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Graph-aware context retrieval layer over claude-mem",
   "type": "module",
@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx src/mcp-server.ts",
-    "stats": "tsx scripts/stats.ts"
+    "stats": "tsx scripts/stats.ts",
+    "postinstall": "npm rebuild better-sqlite3"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
