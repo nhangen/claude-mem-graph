@@ -34971,6 +34971,7 @@ function queryRelated(graph2, options) {
   const hop1 = [];
   const hop1Keys = /* @__PURE__ */ new Set();
   graph2.forEachEdge(startKey, (edge, attrs, source, target) => {
+    if (attrs.type === "relates_to") return;
     const neighborKey = source === startKey ? target : source;
     if (neighborKey === startKey) return;
     hop1Keys.add(neighborKey);
@@ -34987,6 +34988,7 @@ function queryRelated(graph2, options) {
   const hop2Keys = /* @__PURE__ */ new Set();
   for (const hop1Key of hop1Keys) {
     graph2.forEachEdge(hop1Key, (edge, attrs, source, target) => {
+      if (attrs.type === "relates_to") return;
       if (attrs.type === "co_occurs" && attrs.weight < 2) return;
       const neighborKey = source === hop1Key ? target : source;
       if (neighborKey === startKey) return;
