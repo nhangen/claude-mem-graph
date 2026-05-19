@@ -195,6 +195,7 @@ export function queryRelated(
   const hop1Keys = new Set<string>();
 
   graph.forEachEdge(startKey, (edge, attrs, source, target) => {
+    if (attrs.type === 'relates_to') return;
     const neighborKey = source === startKey ? target : source;
     if (neighborKey === startKey) return;
     hop1Keys.add(neighborKey);
@@ -213,6 +214,7 @@ export function queryRelated(
 
   for (const hop1Key of hop1Keys) {
     graph.forEachEdge(hop1Key, (edge, attrs, source, target) => {
+      if (attrs.type === 'relates_to') return;
       if (attrs.type === 'co_occurs' && (attrs.weight as number) < 2) return;
       const neighborKey = source === hop1Key ? target : source;
       if (neighborKey === startKey) return;

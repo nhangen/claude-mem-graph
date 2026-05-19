@@ -121,11 +121,24 @@ describe('queryRelated', () => {
     expect(sessionItem!.hops).toBe(1);
   });
 
-  it('includes relates_to edges for obs:1 concepts', () => {
+  it('excludes relates_to edges (silenced at query time 2026-05-18)', () => {
+    // relates_to is generic-concept noise (every obs has 'how-it-works' / 'what-changed'
+    // → concept hubs fan out to obs:1-17 Obsidian-hooks setup across every query).
+    // Utility eval N=10 confirmed it was the dominant noise source in graph_neighbors.
+    // Reverting this filter must surface relates_to in the output again.
     const result = queryRelated(graph, { observationId: 1 });
-    expect(result.byEdgeType['relates_to']).toBeDefined();
-    const labels = result.byEdgeType['relates_to'].map(i => i.label);
-    expect(labels).toContain('hubspot');
+    expect(result.byEdgeType['relates_to']).toBeUndefined();
+  });
+
+  it('relates_to filter applies at hop2 as well (defense-in-depth)', () => {
+    // Even if a hop1 neighbor has relates_to edges, those must not surface.
+    // This catches regressions where the filter is added at hop1 but not hop2.
+    const result = queryRelated(graph, { observationId: 1, maxResults: 100 });
+    for (const items of Object.values(result.byEdgeType)) {
+      for (const item of items) {
+        expect(item.edgeType).not.toBe('relates_to');
+      }
+    }
   });
 
   it('respects maxResults cap', () => {
