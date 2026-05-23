@@ -89,6 +89,18 @@ describe('queryContext', () => {
     expect(result.sessionArcs).toHaveLength(0);
   });
 
+  it('excludes fixtures older than sinceDays cutoff', () => {
+    // Fixtures span 2025-04-01 through 2025-04-03; FIXTURE_NOW is 2025-04-09.
+    // sinceDays=7 cutoff lands on 2025-04-02 — sessions started 2025-04-01
+    // must be excluded while later ones remain. sinceDays=400 includes
+    // everything. A regression in the cutoff math (e.g. minutes-vs-hours)
+    // would make these counts match.
+    const narrow = queryContext(graph, { project: 'wp-content', sinceDays: 7 });
+    const wide = queryContext(graph, { project: 'wp-content', sinceDays: 400 });
+    expect(narrow.observations.length).toBeGreaterThan(0);
+    expect(narrow.observations.length).toBeLessThan(wide.observations.length);
+  });
+
   it('keyword filter for batch returns only matching observations', () => {
     const result = queryContext(graph, {
       project: 'wp-content',
