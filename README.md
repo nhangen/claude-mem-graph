@@ -19,6 +19,26 @@ On startup, the MCP server:
 
 No background worker. No writes to claude-mem's database. No HTTP port.
 
+## SessionStart trim hook
+
+Optional. On session start, emit a compact context block listing the N most
+recent observations for the current project, falling back to top-N when the
+recency window is empty. This is the lightweight alternative to claude-mem's
+full ~50-observation injection.
+
+Configured via env vars (typically set in `~/.claude/settings.json`):
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `CLAUDE_MEM_GRAPH_TRIM_N` | `10` | Max observations to include. |
+| `CLAUDE_MEM_GRAPH_TRIM_HOURS` | `24` | Recency window in hours. Falls back to top-N when empty. |
+| `CLAUDE_MEM_GRAPH_TRIM_DB` | `~/.claude-mem/claude-mem.db` | Override the db path. |
+
+The hook always exits 0 and emits no output on any error or when no
+observations exist for the current project. To use this in place of
+claude-mem's own SessionStart injection, disable that hook in your
+settings — both injecting context produces duplicated noise.
+
 ## MCP Tools
 
 | Tool | Purpose |

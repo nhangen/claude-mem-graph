@@ -1,4 +1,17 @@
 {
-  "description": "claude-mem-graph hooks (Phase 1: empty, tools are on-demand only)",
-  "hooks": {}
+  "description": "claude-mem-graph hooks",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/session-context.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
 }
