@@ -18,9 +18,18 @@ import { DEFAULT_DB_PATH } from '../src/types.js';
 import {
   selectObservations,
   formatContext,
-  detectProjectFromCwd,
+  resolveProject,
   parsePositiveInt,
 } from '../src/session-context.js';
+
+function logDiag(msg: string): void {
+  try {
+    process.stderr.write(`[claude-mem-graph session-context] ${msg}\n`);
+  } catch {
+    // Last-resort guard: even stderr write can throw if the descriptor is
+    // closed. Stay silent rather than crash the hook.
+  }
+}
 
 function drainStdin(): void {
   try {
@@ -38,18 +47,23 @@ function main(): void {
 
   const limit = parsePositiveInt(process.env.CLAUDE_MEM_GRAPH_TRIM_N, 10);
   const windowHours = parsePositiveInt(process.env.CLAUDE_MEM_GRAPH_TRIM_HOURS, 24);
-  const project = detectProjectFromCwd(process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  if (!project) return;
+  const cwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
   let db: Database.Database;
   try {
     db = new Database(dbPath, { readonly: true });
     db.pragma('query_only = ON');
-  } catch {
+  } catch (e) {
+    logDiag(`db open failed: ${(e as Error).message}`);
     return;
   }
 
   try {
+    const project = resolveProject(db, cwd);
+    if (!project) {
+      logDiag(`no matching project for cwd=${cwd}`);
+      return;
+    }
     const result = selectObservations(db, { project, limit, windowHours });
     const additionalContext = formatContext(result);
     if (!additionalContext) return;
@@ -66,6 +80,6 @@ function main(): void {
 
 try {
   main();
-} catch {
-  // Hook must never break session start.
+} catch (e) {
+  logDiag(`uncaught: ${(e as Error).message}`);
 }

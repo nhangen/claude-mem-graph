@@ -6,7 +6,14 @@
 
 set -u
 
+# Validate HOME, since the orchestrator and tsx loader both depend on it
+# (set -u doesn't catch HOME="" which can occur under cron/CI/env -i contexts).
+: "${HOME:?HOME must be set for claude-mem-graph session-context}"
+
 PLUGIN_DIR="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+if [ -z "$PLUGIN_DIR" ]; then
+  exit 0
+fi
 SCRIPT="$PLUGIN_DIR/scripts/session-context.ts"
 
 if [ ! -f "$SCRIPT" ]; then
