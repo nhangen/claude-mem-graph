@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -29,12 +29,23 @@ function createTestDb(): Database.Database {
 
 let graph: GraphType;
 
+// Fixture timestamps are anchored in early April 2025. Freeze "now" to a date
+// just after the fixture window so sinceDays-based cutoffs stay stable as
+// real-world time advances.
+const FIXTURE_NOW = new Date('2025-04-09T00:00:00Z');
+
 beforeAll(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(FIXTURE_NOW);
   const db = createTestDb();
   const observations = loadObservations(db);
   const sessions = loadSessions(db);
   db.close();
   graph = buildGraph(observations, sessions);
+});
+
+afterAll(() => {
+  vi.useRealTimers();
 });
 
 describe('queryContext', () => {
@@ -76,6 +87,18 @@ describe('queryContext', () => {
     const result = queryContext(graph, { project: 'wp-content', sinceDays: 0 });
     expect(result.observations).toHaveLength(0);
     expect(result.sessionArcs).toHaveLength(0);
+  });
+
+  it('excludes fixtures older than sinceDays cutoff', () => {
+    // Fixtures span 2025-04-01 through 2025-04-03; FIXTURE_NOW is 2025-04-09.
+    // sinceDays=7 cutoff lands on 2025-04-02 — sessions started 2025-04-01
+    // must be excluded while later ones remain. sinceDays=400 includes
+    // everything. A regression in the cutoff math (e.g. minutes-vs-hours)
+    // would make these counts match.
+    const narrow = queryContext(graph, { project: 'wp-content', sinceDays: 7 });
+    const wide = queryContext(graph, { project: 'wp-content', sinceDays: 400 });
+    expect(narrow.observations.length).toBeGreaterThan(0);
+    expect(narrow.observations.length).toBeLessThan(wide.observations.length);
   });
 
   it('keyword filter for batch returns only matching observations', () => {
