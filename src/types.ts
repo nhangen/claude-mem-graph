@@ -16,6 +16,7 @@ export interface ObservationRow {
   prompt_number: number | null;
   relevance_count: number;
   created_at_epoch: number;
+  metadata?: string | null;
 }
 
 export interface SessionRow {
@@ -50,6 +51,7 @@ export interface Observation {
   promptNumber: number | null;
   relevanceCount: number;
   createdAt: number;
+  metadata: Record<string, unknown>;
 }
 
 export interface Session {

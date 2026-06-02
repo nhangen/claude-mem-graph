@@ -47,6 +47,7 @@ settings — both injecting context produces duplicated noise.
 | `graph_neighbors` | Trace connections from a known observation (1-2 hops). Shows causal chains, shared files, session context. This is the core value. |
 | `graph_timeline` | Chronological project history showing which sessions continue previous work. |
 | `graph_file_history` | Find all observations that read or modified a file, across all projects. |
+| `graph_playbook_lineage` | Surface every observation a named playbook produced (matched via `metadata.playbook_id`), grouped by run, plus the union of files those observations modified. Stamping is LLM-mediated today via `CEO_PLAYBOOK_ID` (claude-ceo). |
 | `graph_rebuild` | Refresh the graph from the database. |
 
 ## Examples
@@ -140,7 +141,7 @@ cp -r . ~/.claude/plugins/cache/nhangen/claude-mem-graph/0.2.2/
 cd ~/.claude/plugins/cache/nhangen/claude-mem-graph/0.2.2 && npm install --production
 ```
 
-Restart Claude Code. The 5 tools appear automatically.
+Restart Claude Code. The 6 tools appear automatically.
 
 ## Development
 
@@ -159,7 +160,7 @@ src/
   types.ts          - TypeScript interfaces
   loader.ts         - SQLite reader with schema validation
   graph.ts          - Graph builder with edge inference + narrative causal extraction
-  query.ts          - Query functions for all 5 tools
+  query.ts          - Query functions for all 6 tools
   mcp-server.ts     - MCP stdio server
 ```
 

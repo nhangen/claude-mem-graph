@@ -12,6 +12,8 @@ import {
   queryRelated,
   queryTimeline,
   queryFileImpact,
+  queryPlaybookLineage,
+  formatPlaybookLineageResult,
 } from './query.js';
 import type {
   AnnotatedObservation,
@@ -243,6 +245,20 @@ server.tool(
     const result = queryFileImpact(graph, { filePath: file_path });
     logUsage('graph_file_history', { file_path }, Object.values(result.byProject).flat().length);
     const text = formatFileImpactResult(result);
+    return { content: [{ type: 'text' as const, text }] };
+  }
+);
+
+server.tool(
+  'graph_playbook_lineage',
+  'Surface every observation a named playbook produced, grouped by run (sessionId proxy), plus the union of files those observations modified. Stamping is LLM-mediated today via `CEO_PLAYBOOK_ID` (claude-ceo) → `metadata.playbook_id` on `observation_add`; tool returns an empty-result hint if no observations match.',
+  {
+    playbook_id: z.string().describe('Playbook id to look up (e.g. "morning-scan")'),
+  },
+  async ({ playbook_id }) => {
+    const result = queryPlaybookLineage(graph, { name: playbook_id });
+    logUsage('graph_playbook_lineage', { playbook_id }, result.matchedCount);
+    const text = formatPlaybookLineageResult(result);
     return { content: [{ type: 'text' as const, text }] };
   }
 );

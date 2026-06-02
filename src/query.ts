@@ -557,3 +557,113 @@ export function queryConflicts(
 
   return { pairs };
 }
+
+// --- queryPlaybookLineage ---
+
+export interface QueryPlaybookLineageOptions {
+  name: string;
+}
+
+export interface PlaybookRunGroup {
+  sessionId: string;
+  observations: Observation[];
+  filesTouched: string[];
+}
+
+export interface PlaybookLineageResult {
+  playbookId: string;
+  matchedCount: number;
+  runs: PlaybookRunGroup[];
+  sessionsTouched: string[];
+  filesTouched: string[];
+}
+
+export function queryPlaybookLineage(
+  graph: GraphType,
+  options: QueryPlaybookLineageOptions,
+): PlaybookLineageResult {
+  const { name } = options;
+  const matched: Observation[] = [];
+
+  graph.forEachNode((_key, attrs) => {
+    if (attrs.type !== 'observation') return;
+    const obs = attrs.data as Observation;
+    const pid = obs.metadata?.['playbook_id'];
+    if (typeof pid === 'string' && pid === name) {
+      matched.push(obs);
+    }
+  });
+
+  matched.sort((a, b) => a.createdAt - b.createdAt);
+
+  const runs: PlaybookRunGroup[] = [];
+  const sessionsTouched = new Set<string>();
+  const filesTouched = new Set<string>();
+
+  for (const obs of matched) {
+    sessionsTouched.add(obs.sessionId);
+    for (const f of obs.filesModified) filesTouched.add(f);
+    const last = runs[runs.length - 1];
+    if (last && last.sessionId === obs.sessionId) {
+      last.observations.push(obs);
+      for (const f of obs.filesModified) {
+        if (!last.filesTouched.includes(f)) last.filesTouched.push(f);
+      }
+    } else {
+      runs.push({
+        sessionId: obs.sessionId,
+        observations: [obs],
+        filesTouched: [...obs.filesModified],
+      });
+    }
+  }
+
+  return {
+    playbookId: name,
+    matchedCount: matched.length,
+    runs,
+    sessionsTouched: [...sessionsTouched],
+    filesTouched: [...filesTouched],
+  };
+}
+
+function formatDate(epochMs: number): string {
+  return new Date(epochMs).toISOString().slice(0, 10);
+}
+
+export function formatPlaybookLineageResult(result: PlaybookLineageResult): string {
+  const lines: string[] = [];
+  lines.push(`## Playbook: ${result.playbookId}`);
+  lines.push(`- Matched observations: ${result.matchedCount}`);
+  lines.push(`- Sessions: ${result.sessionsTouched.length}`);
+  lines.push(`- Files touched: ${result.filesTouched.length}`);
+  lines.push('');
+
+  if (result.matchedCount === 0) {
+    lines.push(
+      'No observations stamped with this playbook_id. ' +
+        'Stamping is currently LLM-mediated (claude-ceo exports `CEO_PLAYBOOK_ID`; ' +
+        'the agent is asked to write it into `metadata.playbook_id` on `observation_add` calls). ' +
+        'A run can produce no observations, or the agent can skip the stamp.',
+    );
+    return lines.join('\n');
+  }
+
+  for (const [i, run] of result.runs.entries()) {
+    lines.push(`### Run ${i + 1} — session ${run.sessionId.slice(0, 8)}`);
+    for (const obs of run.observations) {
+      lines.push(`- #${obs.id} [${obs.type}] ${obs.title} (${formatDate(obs.createdAt)})`);
+    }
+    if (run.filesTouched.length > 0) {
+      lines.push(`- Files: ${run.filesTouched.join(', ')}`);
+    }
+    lines.push('');
+  }
+
+  if (result.filesTouched.length > 0) {
+    lines.push('## All files touched');
+    for (const f of result.filesTouched) lines.push(`- ${f}`);
+  }
+
+  return lines.join('\n');
+}

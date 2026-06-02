@@ -12,6 +12,16 @@ function parseJsonArray(raw: string | null): string[] {
   }
 }
 
+function parseJsonObject(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function toObservation(row: ObservationRow): Observation {
   return {
     id: row.id,
@@ -29,6 +39,7 @@ function toObservation(row: ObservationRow): Observation {
     promptNumber: row.prompt_number,
     relevanceCount: row.relevance_count ?? 0,
     createdAt: row.created_at_epoch,
+    metadata: parseJsonObject(row.metadata),
   };
 }
 
@@ -63,10 +74,21 @@ export function validateSchemaVersion(db: Database.Database): void {
   }
 }
 
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  try {
+    const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    return rows.some((r) => r.name === column);
+  } catch {
+    return false;
+  }
+}
+
 export function loadObservations(db: Database.Database): Observation[] {
+  const baseCols = `id, memory_session_id, project, type, title, subtitle, narrative, text, facts,
+            concepts, files_read, files_modified, prompt_number, relevance_count, created_at_epoch`;
+  const metadataCol = hasColumn(db, 'observations', 'metadata') ? ', metadata' : '';
   const rows = db.prepare(
-    `SELECT id, memory_session_id, project, type, title, subtitle, narrative, text, facts,
-            concepts, files_read, files_modified, prompt_number, relevance_count, created_at_epoch
+    `SELECT ${baseCols}${metadataCol}
      FROM observations
      ORDER BY created_at_epoch ASC`
   ).all() as ObservationRow[];
