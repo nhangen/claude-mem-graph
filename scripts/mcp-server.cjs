@@ -30126,16 +30126,44 @@ var SUPPORTED_SCHEMA_VERSIONS = { min: 24, max: 30 };
 var DEFAULT_DB_PATH = `${process.env.HOME}/.claude-mem/claude-mem.db`;
 
 // src/loader.ts
-function parseJsonArray(raw) {
+function createLoadStats() {
+  return { malformed: {} };
+}
+function recordMalformed(ctx, raw, reason) {
+  if (!ctx) return;
+  ctx.stats.malformed[ctx.field] = (ctx.stats.malformed[ctx.field] ?? 0) + 1;
+  const snippet = typeof raw === "string" ? raw.slice(0, 80) : String(raw).slice(0, 80);
+  process.stderr.write(
+    `[claude-mem-graph] malformed ${ctx.field} on observation #${ctx.id} (${reason}): ${snippet}
+`
+  );
+}
+function parseJsonArray(raw, ctx) {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed)) return parsed;
+    recordMalformed(ctx, raw, "not-array");
+    return [];
   } catch {
+    recordMalformed(ctx, raw, "parse-error");
     return [];
   }
 }
-function toObservation(row) {
+function parseJsonObject(raw, ctx) {
+  if (raw === null || raw === void 0 || raw === "") return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    recordMalformed(ctx, raw, "not-object");
+    return {};
+  } catch {
+    recordMalformed(ctx, raw, "parse-error");
+    return {};
+  }
+}
+function toObservation(row, stats) {
+  const mk = (field) => stats ? { id: row.id, field, stats } : void 0;
   return {
     id: row.id,
     sessionId: row.memory_session_id,
@@ -30146,12 +30174,13 @@ function toObservation(row) {
     narrative: row.narrative ?? "",
     text: row.text ?? "",
     facts: row.facts ?? "",
-    concepts: parseJsonArray(row.concepts),
-    filesRead: parseJsonArray(row.files_read),
-    filesModified: parseJsonArray(row.files_modified),
+    concepts: parseJsonArray(row.concepts, mk("concepts")),
+    filesRead: parseJsonArray(row.files_read, mk("files_read")),
+    filesModified: parseJsonArray(row.files_modified, mk("files_modified")),
     promptNumber: row.prompt_number,
     relevanceCount: row.relevance_count ?? 0,
-    createdAt: row.created_at_epoch
+    createdAt: row.created_at_epoch,
+    metadata: parseJsonObject(row.metadata, mk("metadata"))
   };
 }
 function toSession(row) {
@@ -30181,14 +30210,24 @@ function validateSchemaVersion(db) {
     );
   }
 }
-function loadObservations(db) {
+function hasColumn(db, table, column) {
+  try {
+    const rows = db.prepare(`PRAGMA table_info(${table})`).all();
+    return rows.some((r) => r.name === column);
+  } catch {
+    return false;
+  }
+}
+function loadObservations(db, stats) {
+  const baseCols = `id, memory_session_id, project, type, title, subtitle, narrative, text, facts,
+            concepts, files_read, files_modified, prompt_number, relevance_count, created_at_epoch`;
+  const metadataCol = hasColumn(db, "observations", "metadata") ? ", metadata" : "";
   const rows = db.prepare(
-    `SELECT id, memory_session_id, project, type, title, subtitle, narrative, text, facts,
-            concepts, files_read, files_modified, prompt_number, relevance_count, created_at_epoch
+    `SELECT ${baseCols}${metadataCol}
      FROM observations
      ORDER BY created_at_epoch ASC`
   ).all();
-  return rows.map(toObservation);
+  return rows.map((row) => toObservation(row, stats));
 }
 function loadSessions(db) {
   const rows = db.prepare(
@@ -35069,9 +35108,88 @@ function queryFileImpact(graph2, options) {
   });
   return { filePath, byProject };
 }
+function queryPlaybookLineage(graph2, options) {
+  const { name } = options;
+  const matched = [];
+  graph2.forEachNode((_key, attrs) => {
+    if (attrs.type !== "observation") return;
+    const obs = attrs.data;
+    const pid = obs.metadata?.["playbook_id"];
+    if (typeof pid === "string" && pid === name) {
+      matched.push(obs);
+    }
+  });
+  matched.sort((a, b) => a.createdAt - b.createdAt);
+  const runs = [];
+  const sessionsTouched = /* @__PURE__ */ new Set();
+  const filesTouched = /* @__PURE__ */ new Set();
+  for (const obs of matched) {
+    sessionsTouched.add(obs.sessionId);
+    for (const f of obs.filesModified) filesTouched.add(f);
+    const last = runs[runs.length - 1];
+    if (last && last.sessionId === obs.sessionId) {
+      last.observations.push(obs);
+      for (const f of obs.filesModified) {
+        if (!last.filesTouched.includes(f)) last.filesTouched.push(f);
+      }
+    } else {
+      runs.push({
+        sessionId: obs.sessionId,
+        observations: [obs],
+        filesTouched: [...obs.filesModified]
+      });
+    }
+  }
+  return {
+    playbookId: name,
+    matchedCount: matched.length,
+    runs,
+    sessionsTouched: [...sessionsTouched],
+    filesTouched: [...filesTouched]
+  };
+}
+function formatDate(epochMs) {
+  return new Date(epochMs).toISOString().slice(0, 10);
+}
+function formatPlaybookLineageResult(result, options = {}) {
+  const malformed = options.malformedMetadataCount ?? 0;
+  const lines = [];
+  lines.push(`## Playbook: ${result.playbookId}`);
+  lines.push(`- Matched observations: ${result.matchedCount}`);
+  lines.push(`- Sessions: ${result.sessionsTouched.length}`);
+  lines.push(`- Files touched: ${result.filesTouched.length}`);
+  if (malformed > 0) {
+    lines.push(
+      `- \u26A0\uFE0F  ${malformed} row(s) had unparseable \`metadata\` JSON and were treated as unstamped; matches may be hiding behind data corruption (see claude-mem-graph startup log for ids).`
+    );
+  }
+  lines.push("");
+  if (result.matchedCount === 0) {
+    lines.push(
+      "No observations stamped with this playbook_id. Stamping is currently LLM-mediated (claude-ceo exports `CEO_PLAYBOOK_ID`; the agent is asked to write it into `metadata.playbook_id` on `observation_add` calls). A run can produce no observations, or the agent can skip the stamp."
+    );
+    return lines.join("\n");
+  }
+  for (const [i, run] of result.runs.entries()) {
+    lines.push(`### Run ${i + 1} \u2014 session ${run.sessionId.slice(0, 8)}`);
+    for (const obs of run.observations) {
+      lines.push(`- #${obs.id} [${obs.type}] ${obs.title} (${formatDate(obs.createdAt)})`);
+    }
+    if (run.filesTouched.length > 0) {
+      lines.push(`- Files: ${run.filesTouched.join(", ")}`);
+    }
+    lines.push("");
+  }
+  if (result.filesTouched.length > 0) {
+    lines.push("## All files touched");
+    for (const f of result.filesTouched) lines.push(`- ${f}`);
+  }
+  return lines.join("\n");
+}
 
 // src/mcp-server.ts
 var graph;
+var loadStats = createLoadStats();
 var LOG_DIR = (0, import_path.join)(process.env.HOME ?? "", ".claude-mem-graph");
 var LOG_FILE = (0, import_path.join)(LOG_DIR, "usage.jsonl");
 var SESSION_ID = process.env.SESSION_ID ?? `srv-${Date.now()}`;
@@ -35093,7 +35211,8 @@ function logUsage(tool, params, resultCount) {
 }
 function initGraph() {
   const db = openDatabase();
-  const observations = loadObservations(db);
+  loadStats = createLoadStats();
+  const observations = loadObservations(db, loadStats);
   const sessions = loadSessions(db);
   graph = buildGraph(observations, sessions);
   const nodeCount = graph.order;
@@ -35102,8 +35221,15 @@ function initGraph() {
     `[claude-mem-graph] loaded: ${observations.length} observations, ${sessions.length} sessions \u2192 ${nodeCount} nodes, ${edgeCount} edges
 `
   );
+  const malformed = loadStats.malformed;
+  const malformedFields = Object.keys(malformed);
+  if (malformedFields.length > 0) {
+    const summary = malformedFields.sort().map((f) => `${f}=${malformed[f]}`).join(", ");
+    process.stderr.write(`[claude-mem-graph] malformed rows: ${summary}
+`);
+  }
 }
-function formatDate(epochMs) {
+function formatDate2(epochMs) {
   return new Date(epochMs).toISOString().slice(0, 10);
 }
 function formatContextResult(observations, sessionArcs) {
@@ -35125,7 +35251,7 @@ function formatContextResult(observations, sessionArcs) {
       const ann = annotations.length > 0 ? ` \u26A0 ${annotations.join(", ")}` : "";
       lines.push(`### #${obs.id} \u2014 ${obs.title}${ann}`);
       lines.push(`- Project: ${obs.project}  Score: ${score.toFixed(3)}  Type: ${obs.type}`);
-      lines.push(`- Date: ${formatDate(obs.createdAt)}`);
+      lines.push(`- Date: ${formatDate2(obs.createdAt)}`);
       if (obs.concepts.length > 0) {
         lines.push(`- Concepts: ${obs.concepts.join(", ")}`);
       }
@@ -35159,7 +35285,7 @@ function formatTimelineResult(entries) {
   }
   for (const entry of entries) {
     const { session, observations, continuesFrom } = entry;
-    const date5 = formatDate(session.startedAt);
+    const date5 = formatDate2(session.startedAt);
     const sessId = session.contentSessionId.slice(0, 8);
     lines.push(`## ${date5} \u2014 session ${sessId} [${session.status}]`);
     if (continuesFrom) {
@@ -35188,7 +35314,7 @@ function formatFileImpactResult(result) {
   for (const project of projects) {
     lines.push(`### ${project}`);
     for (const obs of result.byProject[project]) {
-      lines.push(`- #${obs.id} [${obs.type}] ${obs.title} (${formatDate(obs.createdAt)})`);
+      lines.push(`- #${obs.id} [${obs.type}] ${obs.title} (${formatDate2(obs.createdAt)})`);
     }
     lines.push("");
   }
@@ -35265,6 +35391,21 @@ server.tool(
     const result = queryFileImpact(graph, { filePath: file_path });
     logUsage("graph_file_history", { file_path }, Object.values(result.byProject).flat().length);
     const text = formatFileImpactResult(result);
+    return { content: [{ type: "text", text }] };
+  }
+);
+server.tool(
+  "graph_playbook_lineage",
+  "Surface every observation a named playbook produced, grouped by run (sessionId proxy), plus the union of files those observations modified. Stamping is LLM-mediated today via `CEO_PLAYBOOK_ID` (claude-ceo) \u2192 `metadata.playbook_id` on `observation_add`; tool returns an empty-result hint if no observations match.",
+  {
+    playbook_id: external_exports3.string().describe('Playbook id to look up (e.g. "morning-scan")')
+  },
+  async ({ playbook_id }) => {
+    const result = queryPlaybookLineage(graph, { name: playbook_id });
+    logUsage("graph_playbook_lineage", { playbook_id }, result.matchedCount);
+    const text = formatPlaybookLineageResult(result, {
+      malformedMetadataCount: loadStats.malformed["metadata"] ?? 0
+    });
     return { content: [{ type: "text", text }] };
   }
 );

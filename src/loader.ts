@@ -2,27 +2,58 @@ import Database from 'better-sqlite3';
 import type { ObservationRow, SessionRow, Observation, Session } from './types.js';
 import { SUPPORTED_SCHEMA_VERSIONS as VERSIONS, DEFAULT_DB_PATH } from './types.js';
 
-function parseJsonArray(raw: string | null): string[] {
+export interface LoadStats {
+  malformed: Record<string, number>;
+}
+
+export function createLoadStats(): LoadStats {
+  return { malformed: {} };
+}
+
+interface ParseCtx {
+  id: number;
+  field: string;
+  stats: LoadStats;
+}
+
+function recordMalformed(ctx: ParseCtx | undefined, raw: unknown, reason: string): void {
+  if (!ctx) return;
+  ctx.stats.malformed[ctx.field] = (ctx.stats.malformed[ctx.field] ?? 0) + 1;
+  const snippet = typeof raw === 'string' ? raw.slice(0, 80) : String(raw).slice(0, 80);
+  process.stderr.write(
+    `[claude-mem-graph] malformed ${ctx.field} on observation #${ctx.id} (${reason}): ${snippet}\n`,
+  );
+}
+
+function parseJsonArray(raw: string | null, ctx?: ParseCtx): string[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed)) return parsed;
+    recordMalformed(ctx, raw, 'not-array');
+    return [];
   } catch {
+    recordMalformed(ctx, raw, 'parse-error');
     return [];
   }
 }
 
-function parseJsonObject(raw: string | null | undefined): Record<string, unknown> {
-  if (!raw) return {};
+function parseJsonObject(raw: string | null | undefined, ctx?: ParseCtx): Record<string, unknown> {
+  if (raw === null || raw === undefined || raw === '') return {};
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    recordMalformed(ctx, raw, 'not-object');
+    return {};
   } catch {
+    recordMalformed(ctx, raw, 'parse-error');
     return {};
   }
 }
 
-function toObservation(row: ObservationRow): Observation {
+function toObservation(row: ObservationRow, stats?: LoadStats): Observation {
+  const mk = (field: string): ParseCtx | undefined =>
+    stats ? { id: row.id, field, stats } : undefined;
   return {
     id: row.id,
     sessionId: row.memory_session_id,
@@ -33,13 +64,13 @@ function toObservation(row: ObservationRow): Observation {
     narrative: row.narrative ?? '',
     text: row.text ?? '',
     facts: row.facts ?? '',
-    concepts: parseJsonArray(row.concepts),
-    filesRead: parseJsonArray(row.files_read),
-    filesModified: parseJsonArray(row.files_modified),
+    concepts: parseJsonArray(row.concepts, mk('concepts')),
+    filesRead: parseJsonArray(row.files_read, mk('files_read')),
+    filesModified: parseJsonArray(row.files_modified, mk('files_modified')),
     promptNumber: row.prompt_number,
     relevanceCount: row.relevance_count ?? 0,
     createdAt: row.created_at_epoch,
-    metadata: parseJsonObject(row.metadata),
+    metadata: parseJsonObject(row.metadata, mk('metadata')),
   };
 }
 
@@ -83,7 +114,7 @@ function hasColumn(db: Database.Database, table: string, column: string): boolea
   }
 }
 
-export function loadObservations(db: Database.Database): Observation[] {
+export function loadObservations(db: Database.Database, stats?: LoadStats): Observation[] {
   const baseCols = `id, memory_session_id, project, type, title, subtitle, narrative, text, facts,
             concepts, files_read, files_modified, prompt_number, relevance_count, created_at_epoch`;
   const metadataCol = hasColumn(db, 'observations', 'metadata') ? ', metadata' : '';
@@ -92,7 +123,7 @@ export function loadObservations(db: Database.Database): Observation[] {
      FROM observations
      ORDER BY created_at_epoch ASC`
   ).all() as ObservationRow[];
-  return rows.map(toObservation);
+  return rows.map((row) => toObservation(row, stats));
 }
 
 export function loadSessions(db: Database.Database): Session[] {
