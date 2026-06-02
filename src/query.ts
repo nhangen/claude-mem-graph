@@ -631,12 +631,25 @@ function formatDate(epochMs: number): string {
   return new Date(epochMs).toISOString().slice(0, 10);
 }
 
-export function formatPlaybookLineageResult(result: PlaybookLineageResult): string {
+export interface FormatPlaybookLineageOptions {
+  malformedMetadataCount?: number;
+}
+
+export function formatPlaybookLineageResult(
+  result: PlaybookLineageResult,
+  options: FormatPlaybookLineageOptions = {},
+): string {
+  const malformed = options.malformedMetadataCount ?? 0;
   const lines: string[] = [];
   lines.push(`## Playbook: ${result.playbookId}`);
   lines.push(`- Matched observations: ${result.matchedCount}`);
   lines.push(`- Sessions: ${result.sessionsTouched.length}`);
   lines.push(`- Files touched: ${result.filesTouched.length}`);
+  if (malformed > 0) {
+    lines.push(
+      `- ⚠️  ${malformed} row(s) had unparseable \`metadata\` JSON and were treated as unstamped; matches may be hiding behind data corruption (see claude-mem-graph startup log for ids).`,
+    );
+  }
   lines.push('');
 
   if (result.matchedCount === 0) {

@@ -1,6 +1,6 @@
 {
   "name": "claude-mem-graph",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "description": "Graph-aware context retrieval layer over claude-mem",
   "type": "module",

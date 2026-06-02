@@ -207,3 +207,54 @@ describe('queryPlaybookLineage', () => {
     expect(result.sessionsTouched.sort()).toEqual(['mem-A', 'mem-B']);
   });
 });
+
+describe('formatPlaybookLineageResult — malformed metadata hint', () => {
+  it('surfaces malformedMetadataCount warning when count > 0 and result is empty', () => {
+    const text = formatPlaybookLineageResult(
+      {
+        playbookId: 'foo',
+        matchedCount: 0,
+        runs: [],
+        sessionsTouched: [],
+        filesTouched: [],
+      },
+      { malformedMetadataCount: 3 },
+    );
+    expect(text).toContain('3 row(s) had unparseable `metadata`');
+    expect(text).toContain('LLM-mediated');
+  });
+
+  it('omits hint when malformedMetadataCount is 0 or undefined', () => {
+    const t1 = formatPlaybookLineageResult({
+      playbookId: 'foo', matchedCount: 0, runs: [],
+      sessionsTouched: [], filesTouched: [],
+    });
+    const t2 = formatPlaybookLineageResult(
+      { playbookId: 'foo', matchedCount: 0, runs: [], sessionsTouched: [], filesTouched: [] },
+      { malformedMetadataCount: 0 },
+    );
+    expect(t1).not.toContain('unparseable');
+    expect(t2).not.toContain('unparseable');
+  });
+
+  it('surfaces hint in non-empty result path too', () => {
+    const text = formatPlaybookLineageResult(
+      {
+        playbookId: 'foo',
+        matchedCount: 1,
+        runs: [{
+          sessionId: 'sess-x', filesTouched: [],
+          observations: [{ id: 1, sessionId: 'sess-x', project: 'p', type: 'change',
+            title: 'ok', subtitle: '', narrative: '', text: '', facts: '',
+            concepts: [], filesRead: [], filesModified: [], promptNumber: 1,
+            relevanceCount: 0, createdAt: 1, metadata: { playbook_id: 'foo' } }],
+        }],
+        sessionsTouched: ['sess-x'],
+        filesTouched: [],
+      },
+      { malformedMetadataCount: 5 },
+    );
+    expect(text).toContain('5 row(s) had unparseable `metadata`');
+    expect(text).toContain('### Run 1');
+  });
+});

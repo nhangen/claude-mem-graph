@@ -3,8 +3,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { appendFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { openDatabase } from './loader.js';
+import { openDatabase, createLoadStats } from './loader.js';
 import { loadObservations, loadSessions } from './loader.js';
+import type { LoadStats } from './loader.js';
 import { buildGraph } from './graph.js';
 import type { GraphType } from './graph.js';
 import {
@@ -24,6 +25,7 @@ import type {
 } from './types.js';
 
 let graph: GraphType;
+let loadStats: LoadStats = createLoadStats();
 
 const LOG_DIR = join(process.env.HOME ?? '', '.claude-mem-graph');
 const LOG_FILE = join(LOG_DIR, 'usage.jsonl');
@@ -49,7 +51,8 @@ function logUsage(tool: string, params: Record<string, unknown>, resultCount: nu
 
 function initGraph(): void {
   const db = openDatabase();
-  const observations = loadObservations(db);
+  loadStats = createLoadStats();
+  const observations = loadObservations(db, loadStats);
   const sessions = loadSessions(db);
   graph = buildGraph(observations, sessions);
   const nodeCount = graph.order;
@@ -57,6 +60,15 @@ function initGraph(): void {
   process.stderr.write(
     `[claude-mem-graph] loaded: ${observations.length} observations, ${sessions.length} sessions → ${nodeCount} nodes, ${edgeCount} edges\n`
   );
+  const malformed = loadStats.malformed;
+  const malformedFields = Object.keys(malformed);
+  if (malformedFields.length > 0) {
+    const summary = malformedFields
+      .sort()
+      .map((f) => `${f}=${malformed[f]}`)
+      .join(', ');
+    process.stderr.write(`[claude-mem-graph] malformed rows: ${summary}\n`);
+  }
 }
 
 function formatDate(epochMs: number): string {
@@ -258,7 +270,9 @@ server.tool(
   async ({ playbook_id }) => {
     const result = queryPlaybookLineage(graph, { name: playbook_id });
     logUsage('graph_playbook_lineage', { playbook_id }, result.matchedCount);
-    const text = formatPlaybookLineageResult(result);
+    const text = formatPlaybookLineageResult(result, {
+      malformedMetadataCount: loadStats.malformed['metadata'] ?? 0,
+    });
     return { content: [{ type: 'text' as const, text }] };
   }
 );
