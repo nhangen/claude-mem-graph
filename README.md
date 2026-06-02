@@ -141,7 +141,7 @@ cp -r . ~/.claude/plugins/cache/nhangen/claude-mem-graph/0.2.2/
 cd ~/.claude/plugins/cache/nhangen/claude-mem-graph/0.2.2 && npm install --production
 ```
 
-Restart Claude Code. The 5 tools appear automatically.
+Restart Claude Code. The 6 tools appear automatically.
 
 ## Development
 
@@ -160,7 +160,7 @@ src/
   types.ts          - TypeScript interfaces
   loader.ts         - SQLite reader with schema validation
   graph.ts          - Graph builder with edge inference + narrative causal extraction
-  query.ts          - Query functions for all 5 tools
+  query.ts          - Query functions for all 6 tools
   mcp-server.ts     - MCP stdio server
 ```
 

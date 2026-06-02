@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { mkdtempSync } from 'fs';
 import { loadObservations, loadSessions } from '../src/loader.js';
 import { buildGraph } from '../src/graph.js';
-import { queryPlaybookLineage } from '../src/query.js';
+import { queryPlaybookLineage, formatPlaybookLineageResult } from '../src/query.js';
 
 function buildDb(opts: { withMetadata: boolean }): Database.Database {
   const dir = mkdtempSync(join(tmpdir(), 'cmg-pl-test-'));
@@ -140,5 +140,70 @@ describe('queryPlaybookLineage', () => {
     db.close();
     expect(observations).toHaveLength(1);
     expect(observations[0].metadata).toEqual({});
+  });
+
+  // Locks in current behavior: groups by *consecutive* session, so A→B→A returns
+  // three runs (not two). If we ever want sessionId-keyed grouping (two runs),
+  // this test flips and the caller surface changes.
+  it('formatter empty-result includes the LLM-mediated stamping hint', () => {
+    const text = formatPlaybookLineageResult({
+      playbookId: 'missing-pb', matchedCount: 0, runs: [],
+      sessionsTouched: [], filesTouched: [],
+    });
+    expect(text).toContain('## Playbook: missing-pb');
+    expect(text).toContain('LLM-mediated');
+    expect(text).toContain('CEO_PLAYBOOK_ID');
+    expect(text).toContain('skip the stamp');
+  });
+
+  it('formatter non-empty result renders runs and files-touched section', () => {
+    const text = formatPlaybookLineageResult({
+      playbookId: 'morning-scan', matchedCount: 2,
+      runs: [
+        {
+          sessionId: 'sess-abc12345', filesTouched: ['a.ts', 'b.ts'],
+          observations: [
+            { id: 1, sessionId: 'sess-abc12345', project: 'p', type: 'change',
+              title: 'first', subtitle: '', narrative: '', text: '', facts: '',
+              concepts: [], filesRead: [], filesModified: ['a.ts'], promptNumber: 1,
+              relevanceCount: 0, createdAt: 1748775600000, metadata: {} },
+            { id: 2, sessionId: 'sess-abc12345', project: 'p', type: 'change',
+              title: 'second', subtitle: '', narrative: '', text: '', facts: '',
+              concepts: [], filesRead: [], filesModified: ['b.ts'], promptNumber: 2,
+              relevanceCount: 0, createdAt: 1748775700000, metadata: {} },
+          ],
+        },
+      ],
+      sessionsTouched: ['sess-abc12345'],
+      filesTouched: ['a.ts', 'b.ts'],
+    });
+    expect(text).toContain('Sessions: 1');
+    expect(text).toContain('Files touched: 2');
+    expect(text).toContain('### Run 1 — session sess-abc');
+    expect(text).toContain('first');
+    expect(text).toContain('second');
+    expect(text).toContain('## All files touched');
+    expect(text).toContain('a.ts');
+    expect(text).toContain('b.ts');
+  });
+
+  it('treats A→B→A as three runs, not two (consecutive-session grouping)', () => {
+    const db = buildDb({ withMetadata: true });
+    insertObs(db, { id: 1, session: 'mem-A', title: 'a1', ts: 1, files: ['x'],
+      metadata: { playbook_id: 'p' } }, true);
+    insertObs(db, { id: 2, session: 'mem-B', title: 'b1', ts: 2, files: ['y'],
+      metadata: { playbook_id: 'p' } }, true);
+    insertObs(db, { id: 3, session: 'mem-A', title: 'a2', ts: 3, files: ['z'],
+      metadata: { playbook_id: 'p' } }, true);
+    const observations = loadObservations(db);
+    const sessions = loadSessions(db);
+    db.close();
+    const graph = buildGraph(observations, sessions);
+
+    const result = queryPlaybookLineage(graph, { name: 'p' });
+    expect(result.matchedCount).toBe(3);
+    expect(result.runs).toHaveLength(3);
+    expect(result.runs.map((r) => r.sessionId)).toEqual(['mem-A', 'mem-B', 'mem-A']);
+    expect(result.sessionsTouched.sort()).toEqual(['mem-A', 'mem-B']);
   });
 });

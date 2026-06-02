@@ -596,7 +596,6 @@ export function queryPlaybookLineage(
 
   matched.sort((a, b) => a.createdAt - b.createdAt);
 
-  // Group consecutive observations by sessionId — same-session runs cluster.
   const runs: PlaybookRunGroup[] = [];
   const sessionsTouched = new Set<string>();
   const filesTouched = new Set<string>();
@@ -626,4 +625,45 @@ export function queryPlaybookLineage(
     sessionsTouched: [...sessionsTouched],
     filesTouched: [...filesTouched],
   };
+}
+
+function formatDate(epochMs: number): string {
+  return new Date(epochMs).toISOString().slice(0, 10);
+}
+
+export function formatPlaybookLineageResult(result: PlaybookLineageResult): string {
+  const lines: string[] = [];
+  lines.push(`## Playbook: ${result.playbookId}`);
+  lines.push(`- Matched observations: ${result.matchedCount}`);
+  lines.push(`- Sessions: ${result.sessionsTouched.length}`);
+  lines.push(`- Files touched: ${result.filesTouched.length}`);
+  lines.push('');
+
+  if (result.matchedCount === 0) {
+    lines.push(
+      'No observations stamped with this playbook_id. ' +
+        'Stamping is currently LLM-mediated (claude-ceo exports `CEO_PLAYBOOK_ID`; ' +
+        'the agent is asked to write it into `metadata.playbook_id` on `observation_add` calls). ' +
+        'A run can produce no observations, or the agent can skip the stamp.',
+    );
+    return lines.join('\n');
+  }
+
+  for (const [i, run] of result.runs.entries()) {
+    lines.push(`### Run ${i + 1} — session ${run.sessionId.slice(0, 8)}`);
+    for (const obs of run.observations) {
+      lines.push(`- #${obs.id} [${obs.type}] ${obs.title} (${formatDate(obs.createdAt)})`);
+    }
+    if (run.filesTouched.length > 0) {
+      lines.push(`- Files: ${run.filesTouched.join(', ')}`);
+    }
+    lines.push('');
+  }
+
+  if (result.filesTouched.length > 0) {
+    lines.push('## All files touched');
+    for (const f of result.filesTouched) lines.push(`- ${f}`);
+  }
+
+  return lines.join('\n');
 }
