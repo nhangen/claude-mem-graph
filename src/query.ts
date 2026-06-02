@@ -557,3 +557,73 @@ export function queryConflicts(
 
   return { pairs };
 }
+
+// --- queryPlaybookLineage ---
+
+export interface QueryPlaybookLineageOptions {
+  name: string;
+}
+
+export interface PlaybookRunGroup {
+  sessionId: string;
+  observations: Observation[];
+  filesTouched: string[];
+}
+
+export interface PlaybookLineageResult {
+  playbookId: string;
+  matchedCount: number;
+  runs: PlaybookRunGroup[];
+  sessionsTouched: string[];
+  filesTouched: string[];
+}
+
+export function queryPlaybookLineage(
+  graph: GraphType,
+  options: QueryPlaybookLineageOptions,
+): PlaybookLineageResult {
+  const { name } = options;
+  const matched: Observation[] = [];
+
+  graph.forEachNode((_key, attrs) => {
+    if (attrs.type !== 'observation') return;
+    const obs = attrs.data as Observation;
+    const pid = obs.metadata?.['playbook_id'];
+    if (typeof pid === 'string' && pid === name) {
+      matched.push(obs);
+    }
+  });
+
+  matched.sort((a, b) => a.createdAt - b.createdAt);
+
+  // Group consecutive observations by sessionId — same-session runs cluster.
+  const runs: PlaybookRunGroup[] = [];
+  const sessionsTouched = new Set<string>();
+  const filesTouched = new Set<string>();
+
+  for (const obs of matched) {
+    sessionsTouched.add(obs.sessionId);
+    for (const f of obs.filesModified) filesTouched.add(f);
+    const last = runs[runs.length - 1];
+    if (last && last.sessionId === obs.sessionId) {
+      last.observations.push(obs);
+      for (const f of obs.filesModified) {
+        if (!last.filesTouched.includes(f)) last.filesTouched.push(f);
+      }
+    } else {
+      runs.push({
+        sessionId: obs.sessionId,
+        observations: [obs],
+        filesTouched: [...obs.filesModified],
+      });
+    }
+  }
+
+  return {
+    playbookId: name,
+    matchedCount: matched.length,
+    runs,
+    sessionsTouched: [...sessionsTouched],
+    filesTouched: [...filesTouched],
+  };
+}

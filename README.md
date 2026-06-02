@@ -47,6 +47,7 @@ settings — both injecting context produces duplicated noise.
 | `graph_neighbors` | Trace connections from a known observation (1-2 hops). Shows causal chains, shared files, session context. This is the core value. |
 | `graph_timeline` | Chronological project history showing which sessions continue previous work. |
 | `graph_file_history` | Find all observations that read or modified a file, across all projects. |
+| `graph_playbook_lineage` | Surface every observation a named playbook produced (matched via `metadata.playbook_id`), grouped by run, plus the union of files those observations modified. Stamping is LLM-mediated today via `CEO_PLAYBOOK_ID` (claude-ceo). |
 | `graph_rebuild` | Refresh the graph from the database. |
 
 ## Examples

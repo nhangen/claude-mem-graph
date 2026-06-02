@@ -12,7 +12,9 @@ import {
   queryRelated,
   queryTimeline,
   queryFileImpact,
+  queryPlaybookLineage,
 } from './query.js';
+import type { PlaybookLineageResult } from './query.js';
 import type {
   AnnotatedObservation,
   SessionArc,
@@ -168,6 +170,43 @@ function formatFileImpactResult(result: FileImpactResult): string {
   return lines.join('\n');
 }
 
+function formatPlaybookLineageResult(result: PlaybookLineageResult): string {
+  const lines: string[] = [];
+  lines.push(`## Playbook: ${result.playbookId}`);
+  lines.push(`- Matched observations: ${result.matchedCount}`);
+  lines.push(`- Sessions: ${result.sessionsTouched.length}`);
+  lines.push(`- Files touched: ${result.filesTouched.length}`);
+  lines.push('');
+
+  if (result.matchedCount === 0) {
+    lines.push(
+      'No observations stamped with this playbook_id. ' +
+        'Stamping is currently LLM-mediated (claude-ceo exports `CEO_PLAYBOOK_ID`; ' +
+        'the agent is asked to write it into `metadata.playbook_id` on `observation_add` calls). ' +
+        'A run can produce no observations, or the agent can skip the stamp.',
+    );
+    return lines.join('\n');
+  }
+
+  for (const [i, run] of result.runs.entries()) {
+    lines.push(`### Run ${i + 1} — session ${run.sessionId.slice(0, 8)}`);
+    for (const obs of run.observations) {
+      lines.push(`- #${obs.id} [${obs.type}] ${obs.title} (${formatDate(obs.createdAt)})`);
+    }
+    if (run.filesTouched.length > 0) {
+      lines.push(`- Files: ${run.filesTouched.join(', ')}`);
+    }
+    lines.push('');
+  }
+
+  if (result.filesTouched.length > 0) {
+    lines.push('## All files touched');
+    for (const f of result.filesTouched) lines.push(`- ${f}`);
+  }
+
+  return lines.join('\n');
+}
+
 try {
   initGraph();
 } catch (err) {
@@ -243,6 +282,20 @@ server.tool(
     const result = queryFileImpact(graph, { filePath: file_path });
     logUsage('graph_file_history', { file_path }, Object.values(result.byProject).flat().length);
     const text = formatFileImpactResult(result);
+    return { content: [{ type: 'text' as const, text }] };
+  }
+);
+
+server.tool(
+  'graph_playbook_lineage',
+  'Surface every observation a named playbook produced, grouped by run (sessionId proxy), plus the union of files those observations modified. Stamping is LLM-mediated today via `CEO_PLAYBOOK_ID` (claude-ceo) → `metadata.playbook_id` on `observation_add`; tool returns an empty-result hint if no observations match.',
+  {
+    name: z.string().describe('Playbook id to look up (e.g. "morning-scan")'),
+  },
+  async ({ name }) => {
+    const result = queryPlaybookLineage(graph, { name });
+    logUsage('graph_playbook_lineage', { name }, result.matchedCount);
+    const text = formatPlaybookLineageResult(result);
     return { content: [{ type: 'text' as const, text }] };
   }
 );
