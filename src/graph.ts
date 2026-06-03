@@ -1,6 +1,7 @@
 import { MultiDirectedGraph } from 'graphology';
 import type { Observation, Session, NodeAttributes, EdgeAttributes } from './types.js';
 import { extractDomainTopics, type TopicIndex } from './topics.js';
+import { BASE_STOPWORDS } from './stopwords.js';
 
 export type GraphType = MultiDirectedGraph<NodeAttributes, EdgeAttributes>;
 
@@ -343,20 +344,11 @@ const CAUSAL_PHRASES = [
   'which caused', 'to fix', 'to resolve', 'stemming from',
 ];
 
-const NARRATIVE_STOPWORDS = new Set([
-  'the', 'this', 'that', 'with', 'from', 'were', 'been', 'have', 'has', 'had', 'was', 'for',
-  'are', 'but', 'not', 'you', 'all', 'can', 'her', 'one', 'our', 'out', 'its', 'also', 'into',
-  'more', 'some', 'such', 'than', 'them', 'then', 'only', 'when', 'will', 'each', 'make',
-  'like', 'over', 'after', 'which', 'their', 'would', 'about', 'these', 'other', 'could',
-  'being', 'first', 'using', 'where', 'while', 'there', 'should', 'still', 'does', 'both',
-  'they', 'what', 'been',
-]);
-
 function extractKeywords(text: string): string[] {
   return text
     .toLowerCase()
     .split(/[\s,.:;()\[\]{}"'!?\/\\]+/)
-    .filter(w => w.length > 3 && !NARRATIVE_STOPWORDS.has(w));
+    .filter(w => w.length > 3 && !BASE_STOPWORDS.has(w));
 }
 
 function extractReasonClauses(narrative: string): string[] {
