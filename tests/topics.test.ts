@@ -54,21 +54,51 @@ describe('extractDomainTopics', () => {
     expect(topicsByObs.get(2)!.has('billing')).toBe(true);
   });
 
-  it('caps topics at TOP_K=5', () => {
+  it('caps topics at TOP_K=5 even when more candidates clear MIN_TFIDF', () => {
+    // 8 unique 4+-char tokens in obs 1; decoy obs ensures none have df===N.
     const obs = [
-      mkObs(1, 'p', 'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda'),
-      mkObs(2, 'p', 'unrelated content here'),
+      mkObs(1, 'p', 'alpha gamma delta zulu yankee xray whiskey victor'),
+      mkObs(2, 'p', 'unrelated subject domain', 'separate corpus content'),
     ];
     const { topicsByObs } = extractDomainTopics(obs);
-    expect(topicsByObs.get(1)!.size).toBeLessThanOrEqual(5);
+    expect(topicsByObs.get(1)!.size).toBe(5);
   });
 
-  it('filters out short tokens and stopwords', () => {
-    const obs = [mkObs(1, 'p', 'the and but real-content here')];
+  it('exercises the stopword filter (not just the length floor)', () => {
+    // 'because', 'always', 'about' are 6/6/5 chars — survive length floor.
+    // Decoy obs prevents df===N suppression of 'genuine' and 'topic'.
+    const obs = [
+      mkObs(1, 'p', 'because always about genuine topic terms here'),
+      mkObs(2, 'p', 'separate corpus content unrelated'),
+    ];
     const { topicsByObs } = extractDomainTopics(obs);
     const topics = topicsByObs.get(1)!;
-    expect(topics.has('the')).toBe(false);
-    expect(topics.has('and')).toBe(false);
-    expect(topics.has('but')).toBe(false);
+    expect(topics.has('because')).toBe(false);
+    expect(topics.has('always')).toBe(false);
+    expect(topics.has('about')).toBe(false);
+    expect(topics.has('genuine')).toBe(true);
+  });
+
+  it('suppresses tokens with df===N (appear in every doc)', () => {
+    const obs = [
+      mkObs(1, 'p', 'common distinctive alpha'),
+      mkObs(2, 'p', 'common other beta'),
+      mkObs(3, 'p', 'common another gamma'),
+    ];
+    const { topicsByObs } = extractDomainTopics(obs);
+    for (const id of [1, 2, 3]) {
+      expect(topicsByObs.get(id)!.has('common')).toBe(false);
+    }
+    expect(topicsByObs.get(1)!.has('distinctive')).toBe(true);
+  });
+
+  it('respects MAX_TEXT_CHARS=600 truncation', () => {
+    const padding = 'padding '.repeat(80); // ~640 chars
+    const obs = [
+      mkObs(1, 'p', 'short', `${padding} uniqueterm`),
+      mkObs(2, 'p', 'decoy', 'other content'),
+    ];
+    const { topicsByObs } = extractDomainTopics(obs);
+    expect(topicsByObs.get(1)!.has('uniqueterm')).toBe(false);
   });
 });

@@ -169,11 +169,19 @@ function addSupersedesEdges(
         continue;
       }
 
+      // Mixed case (one side has filtered concepts, other has zero) is
+      // deliberately skipped: concept-overlap and topic-overlap are not
+      // scale-comparable, so comparing across kinds would inflate edges.
       if (newerConcepts.length === 0 && olderConcepts.length === 0 &&
           hasFileOverlap(newer, older)) {
         const newerTopics = topics.topicsByObs.get(newer.id);
         const olderTopics = topics.topicsByObs.get(older.id);
-        if (!newerTopics || !olderTopics) continue;
+        if (newerTopics === undefined || olderTopics === undefined) {
+          throw new Error(
+            `topic index missing observation ${newerTopics === undefined ? newer.id : older.id} ` +
+            `— extractDomainTopics was called on a different observation set`,
+          );
+        }
         if (newerTopics.size === 0 || olderTopics.size === 0) continue;
         if (setOverlapRatio(newerTopics, olderTopics) >= 0.5) {
           safeAddEdge(graph, `obs:${newer.id}`, `obs:${older.id}`, {
