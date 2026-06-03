@@ -1,15 +1,17 @@
 import { MultiDirectedGraph } from 'graphology';
 import type { Observation, Session, NodeAttributes, EdgeAttributes } from './types.js';
+import { extractDomainTopics, type TopicIndex } from './topics.js';
 
 export type GraphType = MultiDirectedGraph<NodeAttributes, EdgeAttributes>;
 
 export function buildGraph(observations: Observation[], sessions: Session[]): GraphType {
   const graph: GraphType = new MultiDirectedGraph<NodeAttributes, EdgeAttributes>();
+  const topics = extractDomainTopics(observations);
 
   addNodes(graph, observations, sessions);
   addProducedByEdges(graph, observations, sessions);
   addLedToEdges(graph, observations);
-  addSupersedesEdges(graph, observations);
+  addSupersedesEdges(graph, observations, topics);
   addRelatesToEdges(graph, observations);
   addTouchesEdges(graph, observations);
   addPartOfEdges(graph, sessions);
@@ -139,7 +141,11 @@ function conceptOverlapRatio(a: string[], b: string[]): number {
 
 const SUPERSEDES_TYPES: Set<Observation['type']> = new Set(['decision', 'change']);
 
-function addSupersedesEdges(graph: GraphType, observations: Observation[]): void {
+function addSupersedesEdges(
+  graph: GraphType,
+  observations: Observation[],
+  topics: TopicIndex,
+): void {
   const eligible = observations.filter(o => SUPERSEDES_TYPES.has(o.type));
 
   for (let i = 0; i < eligible.length; i++) {
@@ -149,17 +155,50 @@ function addSupersedesEdges(graph: GraphType, observations: Observation[]): void
       const older = eligible[j];
       if (newer.createdAt <= older.createdAt) continue;
       if (newer.project !== older.project) continue;
+
       const newerConcepts = newer.concepts.filter(c => !CONCEPT_STOPWORDS.has(c));
       const olderConcepts = older.concepts.filter(c => !CONCEPT_STOPWORDS.has(c));
-      if (newerConcepts.length === 0 || olderConcepts.length === 0) continue;
-      if (conceptOverlapRatio(newerConcepts, olderConcepts) >= 0.5) {
+
+      if (newerConcepts.length > 0 && olderConcepts.length > 0 &&
+          conceptOverlapRatio(newerConcepts, olderConcepts) >= 0.5) {
         safeAddEdge(graph, `obs:${newer.id}`, `obs:${older.id}`, {
           type: 'supersedes',
           weight: 1,
         });
+        continue;
+      }
+
+      if (newerConcepts.length === 0 && olderConcepts.length === 0 &&
+          hasFileOverlap(newer, older)) {
+        const newerTopics = topics.topicsByObs.get(newer.id);
+        const olderTopics = topics.topicsByObs.get(older.id);
+        if (!newerTopics || !olderTopics) continue;
+        if (newerTopics.size === 0 || olderTopics.size === 0) continue;
+        if (setOverlapRatio(newerTopics, olderTopics) >= 0.5) {
+          safeAddEdge(graph, `obs:${newer.id}`, `obs:${older.id}`, {
+            type: 'supersedes',
+            weight: 1,
+          });
+        }
       }
     }
   }
+}
+
+function hasFileOverlap(a: Observation, b: Observation): boolean {
+  const aFiles = new Set([...a.filesRead, ...a.filesModified]);
+  for (const f of [...b.filesRead, ...b.filesModified]) {
+    if (aFiles.has(f)) return true;
+  }
+  return false;
+}
+
+function setOverlapRatio(a: Set<string>, b: Set<string>): number {
+  const minLen = Math.min(a.size, b.size);
+  if (minLen === 0) return 0;
+  let intersection = 0;
+  for (const x of a) if (b.has(x)) intersection++;
+  return intersection / minLen;
 }
 
 function addRelatesToEdges(graph: GraphType, observations: Observation[]): void {
