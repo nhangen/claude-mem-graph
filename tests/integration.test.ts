@@ -35,11 +35,12 @@ describe.skipIf(SKIP)('integration: production claude-mem.db', () => {
     expect(sessions.length).toBeGreaterThan(0);
   });
 
-  // Ceiling reflects observed steady-state ~900ms on an 11k-node / 44k-edge
-  // production graph with 3× headroom for CI variance. Bump the ceiling only
-  // alongside an updated dataset-size + elapsed line in the console output
-  // below so successive bumps stay traceable.
-  it('builds graph under 1500ms', () => {
+  // Ceiling reflects observed steady-state ~2600ms on a 19.5k-node / 106k-edge
+  // production graph (11468 obs, 805 sess) with topic-augmented supersedes,
+  // ~1.5× headroom for CI variance. Bump the ceiling only alongside an updated
+  // dataset-size + elapsed line in the console output below so successive bumps
+  // stay traceable.
+  it('builds graph under 4000ms', () => {
     const db = new Database(tmpDbPath, { readonly: true });
     const observations = loadObservations(db);
     const sessions = loadSessions(db);
@@ -54,7 +55,7 @@ describe.skipIf(SKIP)('integration: production claude-mem.db', () => {
       `nodes=${graph.order} edges=${graph.size} elapsed=${elapsed.toFixed(1)}ms`,
     );
 
-    expect(elapsed).toBeLessThan(1500);
+    expect(elapsed).toBeLessThan(4000);
     expect(graph.order).toBeGreaterThan(0);
     expect(graph.size).toBeGreaterThan(0);
   });
