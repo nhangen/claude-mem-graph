@@ -136,9 +136,9 @@ claude plugin install claude-mem-graph@nhangen-tools
 
 Or manually:
 ```bash
-mkdir -p ~/.claude/plugins/cache/nhangen/claude-mem-graph/0.2.2
-cp -r . ~/.claude/plugins/cache/nhangen/claude-mem-graph/0.2.2/
-cd ~/.claude/plugins/cache/nhangen/claude-mem-graph/0.2.2 && npm install --production
+mkdir -p ~/.claude/plugins/cache/nhangen/claude-mem-graph/0.2.5
+cp -r . ~/.claude/plugins/cache/nhangen/claude-mem-graph/0.2.5/
+cd ~/.claude/plugins/cache/nhangen/claude-mem-graph/0.2.5 && npm install --production
 ```
 
 Restart Claude Code. The 6 tools appear automatically.
