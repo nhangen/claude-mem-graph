@@ -1,5 +1,12 @@
 # claude-mem-graph
 
+> ⚠️ **RETIRED (2026-07-08).** This plugin is no longer maintained and has been
+> removed from the `nhangen-tools` marketplace — do not install it. Consumers of
+> its `graph_*` MCP tools should drop those integrations: the review skills
+> (`pr-review-panel`/`pr-review-fix`) already fall through gracefully when the
+> graph MCP is absent, but the `recall` skills (obsidian-plugin + watcher) and any
+> live `~/.claude.json` MCP wiring for `claude-mem-graph` need manual removal.
+
 Causal tracing layer over [claude-mem](https://github.com/thedotmack/claude-mem). Reads claude-mem's SQLite database, builds an in-memory knowledge graph, and exposes MCP tools for tracing the story around observations.
 
 ## Why
