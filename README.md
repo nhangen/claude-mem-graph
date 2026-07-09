@@ -147,7 +147,7 @@ Restart Claude Code. The 6 tools appear automatically.
 
 ```bash
 npm install          # install deps
-npm test             # run all tests (73 tests)
+npm test             # run all tests
 npm run test:watch   # watch mode
 npm run build        # bundle to scripts/mcp-server.cjs
 npm run dev          # run MCP server from source
